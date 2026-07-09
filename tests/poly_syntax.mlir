@@ -1,5 +1,5 @@
 // RUN: tutorial-opt %s > %t
-// RUN FileCheck %s < %t
+// RUN: FileCheck %s < %t
 
 module {
   // CHECK-LABEL: test_type_syntax

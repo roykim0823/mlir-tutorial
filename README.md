@@ -3,6 +3,36 @@
 This is the code repository for a series of articles on the
 [MLIR framework](https://mlir.llvm.org/) for building compilers.
 
+## What is MLIR?
+
+MLIR ("Multi-Level Intermediate Representation") is a framework for building
+compilers, created by Chris Lattner's team at Google and now part of the LLVM
+project. Its core idea is that a large compiler should be decomposed into many
+smaller compilers, each translating between intermediate sub-languages at
+different levels of abstraction (e.g., linear algebra, structured loops,
+low-level control flow), so each optimization can run at the level where it is
+easiest to express.
+
+Two concepts appear throughout this series:
+
+- A **dialect** is a self-contained set of operations and types with defined
+  semantics — e.g., `math` (high-level math ops), `scf` (structured control
+  flow like loops), `llvm` (a mirror of LLVM IR).
+- A **lowering** is a pass that rewrites operations from one dialect into
+  equivalent operations of lower-level dialects. Compilation in MLIR is a
+  chain of such lowerings, ending in LLVM IR and then machine code.
+
+The main tool for experimenting is `mlir-opt`, which parses, verifies, and
+runs passes on `.mlir` files. This repo also builds `tutorial-opt`, the same
+tool extended with the custom dialects and passes developed in the articles.
+
+## Step-by-step tutorials
+
+The [`tutorial/`](tutorial/) directory contains detailed step-by-step
+walkthroughs of the articles, adapted to the current state of this repository
+(current LLVM, Bzlmod, renamed tools). If an article and this repo disagree,
+the tutorial files reflect what works today.
+
 ## Articles
 
 1.  [Build System (Getting Started)](https://jeremykun.com/2023/08/10/mlir-getting-started/)
@@ -54,6 +84,15 @@ Run
 ```bash
 bazel build ...:all
 bazel test ...:all
+```
+
+Note: the first build compiles a large portion of LLVM/MLIR and can take an
+hour or more; subsequent builds are incremental and fast.
+
+To verify the toolchain works, run MLIR's main driver and print its help:
+
+```bash
+bazel run @llvm-project//mlir:mlir-opt -- --help
 ```
 
 ### Dependency Management
