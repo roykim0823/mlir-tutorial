@@ -45,6 +45,7 @@ threshold, decryption returns garbage. Here, that becomes: a
 bits, with two constants (from
 [`NoisyDialect.h`](../lib/Dialect/Noisy/NoisyDialect.h)):
 
+***lib/Dialect/Noisy/NoisyDialect.h*** (excerpt)
 ```cpp
 constexpr int INITIAL_NOISE = 12;
 constexpr int MAX_NOISE = 26;
@@ -95,6 +96,7 @@ shell, a parameterless type, ops with constraints (`AnyIntOfWidths<[1,
 2, 3, 4, 5]>` for the message type is the only new constraint trick).
 One line is genuinely new:
 
+***lib/Dialect/Noisy/NoisyOps.td*** (excerpt)
 ```tablegen
 class Noisy_BinOp<string mnemonic> : Op<Noisy_Dialect, mnemonic, [
     Pure,
@@ -113,9 +115,14 @@ then ask an unknown op, dynamically: "do you implement
 are how upstream analyses work with ops they've never heard of — the
 same open-extensibility trick as traits, but carrying code.
 
-The implementations ([`NoisyOps.cpp`](../lib/Dialect/Noisy/NoisyOps.cpp),
-shown in full — this is the entire noise semantics of section 1 as code):
+The implementations are the noise semantics of section 1 as code. Every
+`inferResultRanges` has the same contract: it receives the
+already-inferred ranges of the op's inputs (one `ConstantIntRanges` — a
+bounding interval — per input) and reports its result's range through
+the `setResultRange` callback. Lightly trimmed — the file also has
+`SubOp`, analogous to `AddOp`:
 
+***lib/Dialect/Noisy/NoisyOps.cpp*** (excerpt)
 ```cpp
 ConstantIntRanges initialNoiseRange() {
   return ConstantIntRanges::fromUnsigned(APInt(32, 0),
@@ -152,6 +159,17 @@ void ReduceNoiseOp::inferResultRanges(...) {
 }
 ```
 
+Matching them to section 1's table:
+
+- `EncodeOp` and `ReduceNoiseOp` are the same helper: `initialNoiseRange()`
+  is `[0, INITIAL_NOISE]` = [0, 12] — the table's "fresh" and "reset"
+  rows are literally one function.
+- `AddOp` (and the trimmed `SubOp`) delegate to `unionPlusOne`: union the
+  two input ranges, then add 1 to the upper bound — the table's
+  max(inputs) + 1, expressed on ranges.
+- `MulOp` adds the endpoints (`umin + umin`, `umax + umax`) — the table's
+  "sum of inputs", again as a range.
+
 The clever reuse: these methods were designed for upstream's
 integer-*value* range analysis, but nothing says the integer being
 bounded must be the op's value. Here the range `[0, N]` tracks **bits of
@@ -174,6 +192,7 @@ MLIR packages this as the `DataFlowSolver`. The validation half of the
 pass ([`ReduceNoiseOptimizer.cpp`](../lib/Transform/Noisy/ReduceNoiseOptimizer.cpp))
 shows the whole API:
 
+***lib/Transform/Noisy/ReduceNoiseOptimizer.cpp*** (excerpt)
 ```cpp
 DataFlowSolver solver;
 // The IntegerRangeAnalysis depends on DeadCodeAnalysis, but this
@@ -232,11 +251,10 @@ The or-tools mechanics take a page of glue: build the model with
 `MPSolver::CreateSolver("SCIP")`, `MakeIntVar(0, 1, name)` /
 `MakeNumVar(0, MAX_NOISE, name)`, `SetCoefficient(...)` per constraint —
 then `Solve()`, and read the solution into a map. The analysis class
-wraps it in the shape MLIR expects (note the constructor-does-everything
-pattern, which the article grumbles about — analyses can't easily signal
-failure from a constructor, hence the pass's `FIXME` about infeasible
-models):
+wraps all of it in the shape MLIR expects — construct it on an op, then
+query it:
 
+***lib/Analysis/ReduceNoiseAnalysis/ReduceNoiseAnalysis.h*** (excerpt)
 ```cpp
 class ReduceNoiseAnalysis {
  public:
@@ -247,8 +265,15 @@ class ReduceNoiseAnalysis {
 };
 ```
 
+Note the constructor-does-everything pattern: constructing the analysis
+builds *and solves* the ILP on the spot, and `shouldInsertReduceNoise`
+is afterwards a mere lookup in the stored solution map. The article
+grumbles about this pattern — analyses can't easily signal failure from
+a constructor, hence the pass's `FIXME` about infeasible models.
+
 And the pass itself is almost anticlimactic — solve, walk, insert:
 
+***lib/Transform/Noisy/ReduceNoiseOptimizer.cpp*** (excerpt)
 ```cpp
 ReduceNoiseAnalysis analysis(module);
 module->walk([&](Operation *op) {
@@ -260,8 +285,12 @@ module->walk([&](Operation *op) {
 });
 ```
 
-(`replaceAllUsesExcept` is the one new IR-surgery verb: rewire every use
-of the result to the cleanup op — *except* the cleanup op's own input.)
+In execution order: constructing the analysis solves the ILP (as above);
+the walk then visits every op and skips any the solution didn't mark;
+for a marked op, the builder's insertion point moves to just after it, a
+`reduce_noise` consuming the op's result is created there, and
+`replaceAllUsesExcept` — the one new IR-surgery verb — rewires every use
+of that result to the cleanup op, *except* the cleanup op's own input.
 Then section 3's dataflow validation runs as a built-in self-check: the
 solver's plan is re-verified by an independent analysis before the pass
 declares success. Belt, suspenders, and a good example to copy.

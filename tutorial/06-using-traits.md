@@ -57,8 +57,14 @@ and secondarily to get free verification. Both dimensions show up below.
 
 ## 2. The traits on `poly`'s ops
 
-Here is Tutorial 5's binop base again, this time reading the bracket:
+Mechanically, traits occupy the third template parameter of `Op` — a
+bracketed list of trait names (it defaults to empty, which is why
+Tutorial 5 could ignore it). Each name in the list is one contract in
+section 1's sense: a property the op asserts to every pass, often with a
+verification routine attached. Here is Tutorial 5's binop base again,
+this time reading the bracket:
 
+***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic,
     [Pure, ElementwiseMappable, SameOperandsAndResultType]> {
@@ -69,8 +75,7 @@ class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic,
 }
 ```
 
-The third template parameter of `Op` is a list of traits (it defaults to
-empty — that's why Tutorial 5 could ignore it). Taking them in turn:
+Taking the three traits in turn:
 
 ### `Pure` — the workhorse
 
@@ -101,6 +106,7 @@ Polynomial programs will want *vectors* of polynomials.
 `!poly.poly<10>`, `tensor<2x!poly.poly<10>>`, and vectors alike. It works
 together with the argument constraint:
 
+***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 def PolyOrContainer : TypeOrValueSemanticsContainer<Polynomial, "poly-or-container">;
 ```
@@ -108,6 +114,7 @@ def PolyOrContainer : TypeOrValueSemanticsContainer<Polynomial, "poly-or-contain
 which relaxes "a polynomial" to "a polynomial, or a tensor/vector of
 them". From `tests/poly_syntax.mlir` (Tutorial 5's round-trip test):
 
+***tests/poly_syntax.mlir*** (excerpt)
 ```mlir
 %7 = tensor.from_elements %arg0, %arg1 : tensor<2x!poly.poly<10>>
 %8 = poly.add %7, %7 : tensor<2x!poly.poly<10>>
@@ -151,6 +158,7 @@ Time to collect. Three test files, three upstream passes, zero lines of
 
 [`tests/cse.mlir`](../tests/cse.mlir) computes the same product twice:
 
+***tests/cse.mlir*** (excerpt)
 ```mlir
 %2 = poly.mul %p0, %p0 : !poly.poly<10>
 %3 = poly.mul %p0, %p0 : !poly.poly<10>
@@ -176,6 +184,7 @@ deduplicating it would halve the log.
 [`tests/code_motion.mlir`](../tests/code_motion.mlir) multiplies two
 loop-constant polynomials *inside* a loop:
 
+***tests/code_motion.mlir*** (excerpt)
 ```mlir
 %ret_val = affine.for %i = 0 to 100 iter_args(%sum_iter = %p0) -> !poly.poly<10> {
   %2 = poly.mul %p0, %p1 : !poly.poly<10>
@@ -251,7 +260,9 @@ list.
 
 ## 4. Under the hood
 
-What does the bracket in tablegen become? Run Tutorial 5's
+What does the bracket in tablegen become? Every trait is a C++ *template
+mixin* threaded into the op's base class — the same CRTP dance as
+Tutorials 3–4, at industrial scale. To see it, run Tutorial 5's
 `--gen-op-decls` command again and look at `AddOp`'s actual base class
 (verified, one line, wrapped here):
 
@@ -274,17 +285,19 @@ class AddOp : public ::mlir::Op<AddOp,
     ::mlir::InferTypeOpInterface::Trait> {
 ```
 
-Every trait is a C++ *template mixin* threaded into the op's base class —
-this is the same CRTP dance as Tutorials 3–4, at industrial scale. You can
-see the expansions: `Pure` became the
-`ConditionallySpeculatable`/`AlwaysSpeculatableImplTrait` pair plus
-`MemoryEffectOpInterface` (whose generated `getEffects` body is empty —
-"no effects" as literal code); `ElementwiseMappable` became
-`Elementwise` + `Scalarizable` + `Vectorizable` + `Tensorizable`; and
-`SameOperandsAndResultType` dragged in `InferTypeOpInterface` as promised.
-Even "trivia" you never declared is trait-encoded: `ZeroRegions`,
-`OneResult`, `NOperands<2>` come from the `arguments`/`results` you wrote
-in Tutorial 5.
+You can see the expansions, declaration by declaration:
+
+- `Pure` became the
+  `ConditionallySpeculatable`/`AlwaysSpeculatableImplTrait` pair plus
+  `MemoryEffectOpInterface` (whose generated `getEffects` body is empty —
+  "no effects" as literal code).
+- `ElementwiseMappable` became
+  `Elementwise` + `Scalarizable` + `Vectorizable` + `Tensorizable`.
+- `SameOperandsAndResultType` dragged in `InferTypeOpInterface` as
+  promised.
+- Even "trivia" you never declared is trait-encoded: `ZeroRegions`,
+  `OneResult`, `NOperands<2>` come from the `arguments`/`results` you
+  wrote in Tutorial 5.
 
 Mechanically, a trait is a class template with optional hooks; the most
 common is `verifyTrait`, which runs as part of op verification. That hook

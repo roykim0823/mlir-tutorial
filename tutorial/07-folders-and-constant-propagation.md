@@ -60,6 +60,7 @@ ran), and inside dedicated passes:
 A warm-up on `arith`, from the first function of
 [`tests/sccp.mlir`](../tests/sccp.mlir):
 
+***tests/sccp.mlir***
 ```mlir
 func.func @test_arith_sccp() -> i32 {
   %0 = arith.constant 7 : i32
@@ -110,6 +111,7 @@ When sccp discovers `%2` is "the polynomial with coefficients
 op. `arith` has `arith.constant` for this; `poly` needs its own — this is
 `poly.constant` from `PolyOps.td`, whose `let`s we skipped in Tutorial 5:
 
+***lib/Dialect/Poly/PolyOps.td***
 ```tablegen
 def Poly_ConstantOp : Op<Poly_Dialect, "constant", [Pure, ConstantLike]> {
   let summary = "Define a constant polynomial via an attribute.";
@@ -130,6 +132,7 @@ Two new things:
   *constraint*: any dense-elements attribute with integer elements, of any
   bit width. That buys the flexible syntax seen in `poly_syntax.mlir`:
 
+  ***tests/poly_syntax.mlir*** (excerpt)
   ```mlir
   %10 = poly.constant dense<[2, 3, 4]> : tensor<3xi32> : !poly.poly<10>
   %11 = poly.constant dense<[2, 3, 4]> : tensor<3xi8>  : !poly.poly<10>
@@ -158,6 +161,7 @@ return it; otherwise return `nullptr`, meaning "this fold does not apply"
 [`lib/Dialect/Poly/PolyOps.cpp`](../lib/Dialect/Poly/PolyOps.cpp), in
 increasing order of interest:
 
+***lib/Dialect/Poly/PolyOps.cpp***
 ```cpp
 OpFoldResult ConstantOp::fold(ConstantOp::FoldAdaptor adaptor) {
   return adaptor.getCoefficients();
@@ -167,6 +171,7 @@ OpFoldResult ConstantOp::fold(ConstantOp::FoldAdaptor adaptor) {
 A constant folds to its own attribute — this one-liner is what plugs
 `poly.constant` into the engine's "what value is this?" query.
 
+***lib/Dialect/Poly/PolyOps.cpp***
 ```cpp
 OpFoldResult FromTensorOp::fold(FromTensorOp::FoldAdaptor adaptor) {
   // Returns null if the cast failed, which corresponds to a failed fold.
@@ -179,6 +184,7 @@ that attribute; if the input isn't constant (`getInput()` returns null) or
 is some other attribute kind, `dyn_cast_or_null` yields `nullptr` — a
 declined fold, in one expression.
 
+***lib/Dialect/Poly/PolyOps.cpp***
 ```cpp
 OpFoldResult AddOp::fold(AddOp::FoldAdaptor adaptor) {
   return constFoldBinaryOp<IntegerAttr, APInt, void>(
@@ -196,6 +202,7 @@ of 32-bit `APInt` arithmetic for free). `sub` is the same with `a - b`.
 Multiplication is the real one — naive textbook polynomial multiplication,
 in the ring ℤ[x]/(xᴺ − 1):
 
+***lib/Dialect/Poly/PolyOps.cpp***
 ```cpp
 OpFoldResult MulOp::fold(MulOp::FoldAdaptor adaptor) {
   auto lhs = dyn_cast_or_null<DenseIntElementsAttr>(adaptor.getOperands()[0]);
@@ -233,22 +240,21 @@ OpFoldResult MulOp::fold(MulOp::FoldAdaptor adaptor) {
 }
 ```
 
-Reading it:
-
-- The null guards up front decline the fold when either side isn't a known
-  constant (we'll watch that happen in section 5).
-- The double loop is convolution — coefficient `i` times coefficient `j`
-  lands at index `i+j` — with `% degree` implementing the ring's
-  wraparound: xᴺ ≡ 1, so x¹² in a degree-10 ring is x².
-- `DenseIntElementsAttr` values are iterated as `APInt` via
-  `value_begin<APInt>()`, and the zero-initialization
-  `APInt(bitwidth, 0)` must match the operands' bit width — `APInt`s of
-  different widths don't mix.
-- The result attribute needs a *type* — attributes are typed, so the code
-  conjures a `RankedTensorType` of the right size. (Note it builds one of
-  length `lhs.size() + rhs.size() - 1` even though wraparound means
-  anything past `degree` is zero — a small infelicity we'll actually
-  observe in section 5.)
+Read it in execution order. The null guards up front decline the fold
+when either side isn't a known constant (we'll watch that happen in
+section 5). Past the guards, the code prepares a result vector of
+`lhs.size() + rhs.size() - 1` coefficients, each zero-initialized as
+`APInt(bitwidth, 0)` — the bit width must match the operands', because
+`APInt`s of different widths don't mix. The double loop is convolution:
+`DenseIntElementsAttr` values are iterated as `APInt` via
+`value_begin<APInt>()`, coefficient `i` times coefficient `j` lands at
+index `i+j`, and the `% degree` implements the ring's wraparound —
+xᴺ ≡ 1, so x¹² in a degree-10 ring is x². Finally the vector is packaged
+as the returned attribute, and the result attribute needs a *type* —
+attributes are typed, so the code conjures a `RankedTensorType` of the
+right size. (Note it builds one of length `lhs.size() + rhs.size() - 1`
+even though wraparound means anything past `degree` is zero — a small
+infelicity we'll actually observe in section 5.)
 
 ## 4. Ingredient 3: the constant materializer
 
@@ -259,6 +265,7 @@ themselves are forbidden from creating ops. That is the dialect-level
 `PolyDialect.td` (the last unexplained line from Tutorial 5!), implemented
 in [`PolyDialect.cpp`](../lib/Dialect/Poly/PolyDialect.cpp):
 
+***lib/Dialect/Poly/PolyDialect.cpp***
 ```cpp
 Operation *PolyDialect::materializeConstant(OpBuilder &builder, Attribute value,
                                             Type type, Location loc) {
@@ -270,8 +277,11 @@ Operation *PolyDialect::materializeConstant(OpBuilder &builder, Attribute value,
 ```
 
 The engine hands the dialect an attribute and the type the value must
-have, and the dialect decides which op represents it — here, build a
-`poly.constant`. The division of labor is now complete:
+have, and the dialect decides which op represents it: the `dyn_cast`
+guard returns `nullptr` for any attribute kind that isn't the
+dense-integer form our folds produce — declining, just as a fold does —
+and otherwise builds a `poly.constant`. The division of labor is now
+complete:
 
 > folders **compute** attributes → the materializer turns attributes into
 > **constant ops** → `ConstantLike`/`ConstantOp::fold` let engines read
@@ -282,6 +292,7 @@ have, and the dialect decides which op represents it — here, build a
 The second function of [`tests/sccp.mlir`](../tests/sccp.mlir) is
 Tutorial 6's CSE example, but now we can *compute* it:
 
+***tests/sccp.mlir***
 ```mlir
 func.func @test_poly_sccp() -> !poly.poly<10> {
   %0 = arith.constant dense<[1, 2, 3]> : tensor<3xi32>

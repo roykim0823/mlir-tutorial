@@ -65,6 +65,7 @@ counts the leading zero bits of an integer
 ([`tests/ctlz_simple.mlir`](../tests/ctlz_simple.mlir) contains a version of
 this):
 
+***tests/ctlz_simple.mlir*** (excerpt)
 ```mlir
 func.func @main(%arg0: i32) -> i32 {
   %0 = math.ctlz %arg0 : i32
@@ -144,10 +145,12 @@ Even with no passes, `mlir-opt` did three useful things:
 So `mlir-opt some_file.mlir` with no flags is a quick way to check "is this
 valid MLIR?"
 
-It's worth seeing the verifier catch something. Put this in a scratch file —
+It's worth seeing the verifier catch something. Put this in a scratch file,
+say `bad_types.mlir` (the repo also keeps a copy, `tests/wrong_type.mlir`) —
 it multiplies an `i32` by an `i64`, which `arith.muli` forbids (its operands
 must have matching types):
 
+***tests/wrong_type.mlir***
 ```mlir
 func.func @bad(%a: i32, %b: i64) -> i32 {
   %0 = arith.muli %a, %b : i32

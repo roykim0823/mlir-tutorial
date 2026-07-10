@@ -3,6 +3,11 @@
 # run relative to this script's location (tutorial/script/), so it works from any cwd
 cd "$(dirname "$0")" || exit 1
 
+# print a section banner. The { ...; } 2>/dev/null redirections keep set -x
+# trace noise out of the output: inside the function for its own commands,
+# and at each call site ({ step "..."; } 2>/dev/null) for the call itself.
+step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
+
 set -x  # turn on command echoing
 TESTS="../../tests"
 TUTORIAL_OPT="${TUTORIAL_OPT:-../../bazel-bin/tools/tutorial-opt}"
@@ -11,7 +16,7 @@ LLVM_INCLUDE="/opt/homebrew/opt/llvm@20/include"
 
 SCRATCH=$(mktemp -d)
 
-# 1. What `poly` represents, concretely (05-defining-a-new-dialect.md)
+{ step "1. What poly represents, concretely (05-defining-a-new-dialect.md)"; } 2>/dev/null
 # The "tiny poly program" from section 1: build p = 1 + 2x + 3x^2, square it,
 # evaluate at x = 7. Wrapped in a function so it parses standalone.
 cat > $SCRATCH/poly_square_eval.mlir <<'EOF'
@@ -32,12 +37,12 @@ $TUTORIAL_OPT $SCRATCH/poly_square_eval.mlir
 # folded -- EvalOp has no folder -- so 26244 stays a math annotation.
 $TUTORIAL_OPT $SCRATCH/poly_square_eval.mlir --canonicalize
 
-# 2. The dialect shell (05-defining-a-new-dialect.md)
+{ step "2. The dialect shell"; } 2>/dev/null
 # (markdown paths lib/Dialect/Poly/... rewritten relative to tutorial/)
 mlir-tblgen --gen-dialect-decls -I "$LLVM_INCLUDE" \
   -I ../../lib/Dialect/Poly ../../lib/Dialect/Poly/PolyDialect.td
 
-# 7. Step: exercise the syntax (05-defining-a-new-dialect.md)
+{ step "7. Step: exercise the syntax"; } 2>/dev/null
 $TUTORIAL_OPT $TESTS/poly_syntax.mlir
 
 # skipped: bazel test //tests:poly_syntax.mlir.test (bazel test; see §7)

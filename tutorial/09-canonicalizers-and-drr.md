@@ -39,6 +39,13 @@ The running examples are two genuinely mathematical rewrites:
 
 ---
 
+> **Heads-up before you read any code:** this tutorial presents the
+> canonicalization pattern twice — section 3 in C++ (the article's
+> version, which is **not what `lib/` contains**; it is preserved,
+> buildable, in [`tutorial/code/09/`](code/09/)), and section 4 in DRR,
+> which *is* the main tree's version
+> (`lib/Dialect/Poly/PolyPatterns.td`). Both produce the same rewrites.
+
 ## 1. Concepts: canonicalization vs. folding
 
 Tutorial 7 drew folding's box deliberately small: one op, no new ops,
@@ -78,6 +85,7 @@ how an op volunteers them.
 
 In `PolyOps.td` (Tutorial 5), the binops and `eval` declare:
 
+***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 let hasCanonicalizer = 1;
 ```
@@ -93,6 +101,7 @@ The `--canonicalize` pass calls this on every registered op type and
 collects the patterns. The implementations at the bottom of
 [`PolyOps.cpp`](../lib/Dialect/Poly/PolyOps.cpp) are one line each:
 
+***lib/Dialect/Poly/PolyOps.cpp*** (excerpt)
 ```cpp
 void SubOp::getCanonicalizationPatterns(::mlir::RewritePatternSet &results,
                                         ::mlir::MLIRContext *context) {
@@ -114,9 +123,13 @@ conjugation rewrite roots at the `eval`.
 ## 3. The pattern in C++ (the article's version)
 
 The article first writes `DifferenceOfSquares` exactly the way Tutorial 3
-taught — worth reading in full because the DRR version must be understood
-*as shorthand for this*:
+taught: an ordinary `OpRewritePattern<SubOp>` — rooted at the `sub`, as
+section 2 chose — following Tutorial 3 §8's two-phase discipline, a match
+phase that only inspects and bails out, then a rewrite phase that builds
+the replacement. It's worth reading in full because the DRR version must
+be understood *as shorthand for this*:
 
+***tutorial/code/09/DifferenceOfSquares.cpp*** (excerpt)
 ```cpp
 struct DifferenceOfSquares : public OpRewritePattern<SubOp> {
   DifferenceOfSquares(mlir::MLIRContext *context)
@@ -149,24 +162,31 @@ struct DifferenceOfSquares : public OpRewritePattern<SubOp> {
     SubOp newSub = rewriter.create<SubOp>(op.getLoc(), x, y);
     MulOp newMul = rewriter.create<MulOp>(op.getLoc(), newAdd, newSub);
 
-    rewriter.replaceOp(op, {newMul});
+    // The article wrote `replaceOp(op, {newMul})`; the braced form is
+    // ambiguous (ValueRange vs. Operation*) in current MLIR.
+    rewriter.replaceOp(op, newMul);
     return success();
   }
 };
 ```
 
-All Tutorial 3 vocabulary — `getDefiningOp` to climb the SSA graph,
-match-phase bailouts before any mutation, `create`/`replaceOp`. Two
-details are new and semantic, not mechanical:
+All Tutorial 3 vocabulary, and one short linear path — read it in
+execution order. The match phase is three bailouts, each returning
+`failure()` before anything is mutated. The first — the **`hasOneUse`
+guard** — is the one genuinely new, *semantic* check: if `x²` has
+*another* consumer, rewriting the sub doesn't retire the mul — it would
+still be computed, and we'd have *added* ops for nothing. "Is this
+rewrite profitable?" often reduces to use-count checks. The second climbs
+the SSA graph with `getDefiningOp<MulOp>`: both operands must be
+products. The third, the `getLhs() == getRhs()` comparisons, requires
+each product to be a *square* — both factors the same value. Only once
+all three pass does the rewrite phase run: bind `x` and `y`, `create`
+the new add, sub, and mul, and `replaceOp` the root.
 
-- **The `hasOneUse` guard.** If `x²` has *another* consumer, rewriting
-  the sub doesn't retire the mul — it would still be computed, and we'd
-  have *added* ops for nothing. "Is this rewrite profitable?" often
-  reduces to use-count checks.
-- **What's *not* here: erasing the muls.** The pattern replaces only the
-  root `sub`; the old muls become dead and the canonicalizer's built-in
-  dead-code cleanup (section 1, item 3) collects them. Rewrite the root,
-  let the driver sweep.
+The other semantic detail is **what's *not* here: erasing the muls.**
+The pattern replaces only the root `sub`; the old muls become dead and
+the canonicalizer's built-in dead-code cleanup (section 1, item 3)
+collects them. Rewrite the root, let the driver sweep.
 
 > **Want to run this exact pattern?** It is kept buildable in
 > [`tutorial/code/09/`](code/09/), wrapped as a standalone pass so the
@@ -188,9 +208,9 @@ Look closely at section 3: about 30 lines, of which perhaps 6 carry the
 The rest is casts, null checks, and plumbing. **DRR** (Declarative
 Rewrite Rules) is a tablegen language for exactly this shape of pattern:
 say the source DAG, say the target DAG, let a generator write the
-plumbing. The repo's current implementation, from
-[`lib/Dialect/Poly/PolyPatterns.td`](../lib/Dialect/Poly/PolyPatterns.td):
+plumbing. The repo's current implementation:
 
+***lib/Dialect/Poly/PolyPatterns.td*** (excerpt)
 ```tablegen
 def HasOneUse: Constraint<CPred<"$_self.hasOneUse()">, "has one use">;
 
@@ -231,6 +251,7 @@ Reading the language:
 The conjugation rewrite is the simple form — one op in, one op out,
 `Pat`:
 
+***lib/Dialect/Poly/PolyPatterns.td*** (excerpt)
 ```tablegen
 def LiftConjThroughEval : Pat<
   (Poly_EvalOp $f, (ConjOp $z, $fastmath)),
@@ -285,6 +306,7 @@ below is real).
 
 **Difference of squares, firing:**
 
+***tests/poly_canonicalize.mlir*** (excerpt)
 ```mlir
 func.func @test_difference_of_squares(
     %0: !poly.poly<3>, %1: !poly.poly<3>) -> !poly.poly<3> {
@@ -318,6 +340,7 @@ a rewrite that fires only when profitable.
 
 **Conjugate through eval:**
 
+***tests/poly_canonicalize.mlir*** (excerpt)
 ```mlir
 %z_bar = complex.conj %z : complex<f64>
 %evaled = poly.eval %f, %z_bar : (!poly.poly<3>, complex<f64>) -> complex<f64>

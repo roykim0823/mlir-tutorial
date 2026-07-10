@@ -117,8 +117,13 @@ ops), matching `.h`/`.cpp` pairs, and build files.
 
 ## 2. The dialect shell
 
+In tablegen, a dialect shell is a single record: one `def` deriving from
+the upstream `Dialect` class, whose `let` fields tell the generators
+everything they need — the dialect's textual name, where the generated
+C++ should live, and which optional machinery to emit. Here is
 [`PolyDialect.td`](../lib/Dialect/Poly/PolyDialect.td) in full:
 
+***lib/Dialect/Poly/PolyDialect.td***
 ```tablegen
 include "mlir/IR/OpBase.td"
 
@@ -203,6 +208,7 @@ include the generated code needs, plus the `.h.inc` — the same
 One line in [`tools/tutorial-opt.cpp`](../tools/tutorial-opt.cpp), next to
 the pass registrations from Tutorial 3 §3:
 
+***tools/tutorial-opt.cpp*** (excerpt)
 ```cpp
 mlir::DialectRegistry registry;
 registry.insert<mlir::tutorial::poly::PolyDialect>();
@@ -233,8 +239,16 @@ dialect.
 
 ## 4. The type: `!poly.poly<10>`
 
+A custom type gets the same treatment as the dialect: one tablegen
+record — a `TypeDef` tied to its dialect — from which the generators
+produce a C++ class. Three `let` fields carry the substance, and the
+bullets below unpack each: the type's syntax keyword (its *mnemonic*),
+the compile-time data it carries (its *parameters* — the `10` in
+`!poly.poly<10>`), and the textual format that
+`useDefaultTypePrinterParser` turns into a parser and printer. Here is
 [`PolyTypes.td`](../lib/Dialect/Poly/PolyTypes.td) in full:
 
+***lib/Dialect/Poly/PolyTypes.td***
 ```tablegen
 include "PolyDialect.td"
 include "mlir/IR/AttrTypeBase.td"
@@ -306,10 +320,15 @@ parameter types eventually require hand-written storage.
 
 ## 5. The ops
 
-[`PolyOps.td`](../lib/Dialect/Poly/PolyOps.td) defines the operations. The
-binary ops come from a shared base — shown here as the current repo has
-it, with the forward references annotated:
+[`PolyOps.td`](../lib/Dialect/Poly/PolyOps.td) defines the operations, one
+ODS record per op, with the same record-plus-`let`-fields shape as the
+dialect and type above: an `Op<...>` ties the op to its dialect and names
+its mnemonic, and `let`s declare what the op takes (`arguments`), what it
+produces (`results`), and how it prints (`assemblyFormat`). The binary
+ops come from a shared base — shown here as the current repo has it, with
+the forward references annotated:
 
+***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic,
     [Pure, ElementwiseMappable, SameOperandsAndResultType]> {  // Tutorial 6
@@ -355,6 +374,7 @@ and plain `Polynomial:$lhs` arguments; the shape to internalize is:
 Then the ops that cross the dialect boundary — polynomials have to come
 from somewhere and produce usable numbers:
 
+***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 def Poly_FromTensorOp : Op<Poly_Dialect, "from_tensor", [Pure]> {
   let summary = "Creates a Polynomial from integer coefficients stored in a tensor.";
@@ -386,6 +406,7 @@ both arrive in later tutorials.
 generated definitions get compiled and attached (trimmed to today's
 scope):
 
+***lib/Dialect/Poly/PolyDialect.cpp*** (excerpt)
 ```cpp
 #include "lib/Dialect/Poly/PolyDialect.cpp.inc"
 #define GET_TYPEDEF_CLASSES
@@ -426,6 +447,7 @@ The build has one `gentbl_cc_library` per tablegen file
 ([`BUILD`](../lib/Dialect/Poly/BUILD)), each running two backends, plus a
 `td_library` grouping the `.td` sources for reuse:
 
+***lib/Dialect/Poly/BUILD*** (excerpt)
 ```python
 td_library(name = "td_files",
     srcs = ["PolyDialect.td", "PolyOps.td", "PolyTypes.td", ...], ...)

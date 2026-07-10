@@ -3,12 +3,17 @@
 # run relative to this script's location (tutorial/script/), so it works from any cwd
 cd "$(dirname "$0")" || exit 1
 
+# print a section banner. The { ...; } 2>/dev/null redirections keep set -x
+# trace noise out of the output: inside the function for its own commands,
+# and at each call site ({ step "..."; } 2>/dev/null) for the call itself.
+step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
+
 set -x  # turn on command echoing
 TESTS="../../tests"
 TUTORIAL_OPT="${TUTORIAL_OPT:-../../bazel-bin/tools/tutorial-opt}"
 SCRATCH=$(mktemp -d)
 
-# 1. Concepts: folding and its consumers (07-folders-and-constant-propagation.md)
+{ step "1. Concepts: folding and its consumers (07-folders-and-constant-propagation.md)"; } 2>/dev/null
 # the warm-up functions live in tests/sccp.mlir
 cat $TESTS/sccp.mlir
 
@@ -18,7 +23,7 @@ $TUTORIAL_OPT -pass-pipeline="builtin.module(func.func(sccp))" $TESTS/sccp.mlir
 # (command implied by the markdown; output shown there is from this run)
 $TUTORIAL_OPT --canonicalize $TESTS/sccp.mlir
 
-# 5. Step: watch it work (07-folders-and-constant-propagation.md)
+{ step "5. Step: watch it work"; } 2>/dev/null
 # same sccp command, now looking at the second function @test_poly_sccp
 $TUTORIAL_OPT -pass-pipeline="builtin.module(func.func(sccp))" $TESTS/sccp.mlir
 

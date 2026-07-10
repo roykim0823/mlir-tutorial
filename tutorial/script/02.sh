@@ -3,10 +3,15 @@
 # run relative to this script's location (tutorial/script/), so it works from any cwd
 cd "$(dirname "$0")" || exit 1
 
+# print a section banner. The { ...; } 2>/dev/null redirections keep set -x
+# trace noise out of the output: inside the function for its own commands,
+# and at each call site ({ step "..."; } 2>/dev/null) for the call itself.
+step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
+
 set -x  # turn on command echoing
 TESTS="../../tests"
 
-# 3. The example program
+{ step "3. The example program (02-testing-a-lowering.md)"; } 2>/dev/null
 cat $TESTS/filecheck_directives.mlir
 
 mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=LOOSE
@@ -26,7 +31,7 @@ echo $?
 
 mlir-opt $TESTS/ctlz_simple.mlir | FileCheck $TESTS/ctlz_simple.mlir 
 
-#4. Step
+{ step "4. Step"; } 2>/dev/null
 cat $TESTS/ctlz_simple.mlir
 
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir \
@@ -34,7 +39,7 @@ mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir \
 
 mlir-opt $TESTS/ctlz_simple.mlir | FileCheck $TESTS/ctlz_simple.mlir
 
-#5. Step: exhaustive asserions
+{ step "5. Step: exhaustive asserions"; } 2>/dev/null
 # (input must be ctlz.mlir itself — its CHECK lines were generated from
 #  ctlz.mlir's @main; ctlz_simple.mlir's @main has a different signature)
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz.mlir \
@@ -47,7 +52,7 @@ curl -sLo /tmp/generate-test-checks.py \
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir \
 								 | python3 /tmp/generate-test-checks.py
 
-# 8. Bonus step
+{ step "8. Bonus step"; } 2>/dev/null
 mlir-opt $TESTS/ctlz_runner.mlir \
   -pass-pipeline="builtin.module( \
      convert-math-to-funcs{convert-ctlz}, \

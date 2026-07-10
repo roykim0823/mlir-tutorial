@@ -73,6 +73,7 @@ constraint `IntOrComplex` admits *any* integer width — but our semantics
 identities). Widths are not something a simple type constraint
 expresses, so `PolyOps.td` declares:
 
+***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 def Poly_EvalOp : Op<Poly_Dialect, "eval",
     [AllTypesMatch<["point", "output"]>, Has32BitArguments]> {
@@ -83,9 +84,13 @@ def Poly_EvalOp : Op<Poly_Dialect, "eval",
 
 `hasVerifier = 1` makes tablegen emit a declaration —
 `::llvm::LogicalResult verify();` on the generated `EvalOp` class — that
-*you* must implement. The implementation, from
+*you* must implement. The contract is small: `verify()` is an ordinary
+member method on the op class — so it has full access to typed accessors
+like `getPoint()` — that inspects the op and returns Tutorial 3's
+`LogicalResult`. The implementation, from
 [`lib/Dialect/Poly/PolyOps.cpp`](../lib/Dialect/Poly/PolyOps.cpp):
 
+***lib/Dialect/Poly/PolyOps.cpp***
 ```cpp
 LogicalResult EvalOp::verify() {
   auto pointTy = getPoint().getType();
@@ -98,21 +103,22 @@ LogicalResult EvalOp::verify() {
 }
 ```
 
-Notes:
-
-- It's an ordinary method on the op class — full access to typed
-  accessors like `getPoint()`, and it returns Tutorial 3's
-  `LogicalResult`.
-- **`emitOpError` is load-bearing.** Returning bare `failure()` fails
-  verification *silently* — the pipeline aborts with no explanation.
-  `emitOpError` attaches a proper diagnostic ('poly.eval' op prefix,
-  source location, caret) and conveniently *returns* a failure, so the
-  idiom is `return emitOpError("...")` or the conditional above.
-- `isSignlessInteger(32)`: MLIR integers come in *signless* (`i32` — no
-  inherent signedness; ops decide, like `arith.addi` vs comparison
-  flavors), *signed* (`si32`), and *unsigned* (`ui32`) variants. Almost
-  all real dialects use signless. Keep this distinction in mind for
-  section 4's experiment.
+The body is one straight-line check, so read it in execution order.
+`getPoint().getType()` fetches the point operand's type through the
+typed accessor. The first test, `isSignlessInteger(32)`, hides a
+vocabulary point: MLIR integers come in *signless* (`i32` — no inherent
+signedness; ops decide, like `arith.addi` vs comparison flavors),
+*signed* (`si32`), and *unsigned* (`ui32`) variants; almost all real
+dialects use signless, and this verifier demands specifically a
+*signless* 32-bit integer. Keep that distinction in mind for section 4's
+experiment. The second test, the `dyn_cast<ComplexType>`, admits a
+complex point instead. If either passes, `success()`; otherwise the
+error branch runs, and there **`emitOpError` is load-bearing**:
+returning bare `failure()` fails verification *silently* — the pipeline
+aborts with no explanation — while `emitOpError` attaches a proper
+diagnostic ('poly.eval' op prefix, source location, caret) and
+conveniently *returns* a failure, so the idiom is
+`return emitOpError("...")` or the conditional above.
 
 ## 3. A custom trait verifier
 
@@ -122,6 +128,7 @@ carry verification routines; now we write one. Two pieces. In
 [`PolyOps.td`](../lib/Dialect/Poly/PolyOps.td), declare the trait's
 existence and C++ home:
 
+***lib/Dialect/Poly/PolyOps.td***
 ```tablegen
 def Has32BitArguments : NativeOpTrait<"Has32BitArguments"> {
   let cppNamespace = "::mlir::tutorial::poly";
@@ -131,10 +138,18 @@ def Has32BitArguments : NativeOpTrait<"Has32BitArguments"> {
 `NativeOpTrait` means "the implementation is hand-written C++ — tablegen,
 just splice the name into the generated op's trait list" (you can see it
 spliced last in Tutorial 6 §4's generated `AddOp` mixin list, for `add`'s
-traits; `eval` gets this one). The implementation,
+traits; `eval` gets this one).
+
+On the C++ side, a hand-written trait has a fixed shape: a class
+template over `ConcreteType` (Tutorial 4's CRTP yet again), deriving
+from `OpTrait::TraitBase`, that the generated op class mixes in — and
+its verification hook is a *static* `verifyTrait(Operation *op)`, which
+receives a **generic** `Operation*`, not an `EvalOp`, because the same
+trait must work on any op that lists it. The implementation,
 [`lib/Dialect/Poly/PolyTraits.h`](../lib/Dialect/Poly/PolyTraits.h) in
 full:
 
+***lib/Dialect/Poly/PolyTraits.h***
 ```cpp
 template <typename ConcreteType>
 class Has32BitArguments : public OpTrait::TraitBase<ConcreteType, Has32BitArguments> {
@@ -157,11 +172,10 @@ class Has32BitArguments : public OpTrait::TraitBase<ConcreteType, Has32BitArgume
 Compare it with section 2's op verifier — the differences are the whole
 trait-vs-verifier tradeoff:
 
-- It's a template over `ConcreteType` (Tutorial 4's CRTP yet again) with
-  a *static* `verifyTrait(Operation *op)` — it receives a **generic**
-  `Operation*`, not an `EvalOp`. No `getPoint()`; it can only loop over
-  `getOperandTypes()` and apply type-level checks. Generic, hence
-  reusable on any op — and blind to any op's specifics.
+- The genericity has its price right there in the body: no `getPoint()`;
+  the trait can only loop over `getOperandTypes()` and apply type-level
+  checks. Generic, hence reusable on any op — and blind to any op's
+  specifics.
 - `emitOpError` here is called on the `Operation*` and streamed into
   (`<< "..."`), same diagnostic machinery, different spelling.
 - Note the deliberate skips: non-integer types `continue` (so the
@@ -234,6 +248,7 @@ Verifier tests differ from every previous test in one way: the
 interesting output is on **stderr**, and `tutorial-opt` exits nonzero.
 [`tests/poly_verifier.mlir`](../tests/poly_verifier.mlir), in full:
 
+***tests/poly_verifier.mlir***
 ```mlir
 // RUN: tutorial-opt %s 2>%t; FileCheck %s < %t
 

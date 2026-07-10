@@ -105,6 +105,7 @@ This repo carries a small demo file for exactly this section,
 Its input program is two functions, where only the **second** one contains
 an `arith.addi`:
 
+***tests/filecheck_directives.mlir*** (excerpt)
 ```mlir
 func.func @square(%arg0: i32) -> i32 {
   %0 = arith.muli %arg0, %arg0 : i32
@@ -150,6 +151,7 @@ the thing you meant to test* and find its match somewhere else entirely.
 The `LOOSE` group constructs that failure — suppose we (wrongly) believe
 `@square` computes `2*x`:
 
+***tests/filecheck_directives.mlir*** (excerpt)
 ```mlir
 // LOOSE: func.func @square
 // LOOSE: arith.addi
@@ -183,6 +185,7 @@ next label.
 The `STRICT` group makes the same bogus assertion as `LOOSE`, wrapped in
 labels:
 
+***tests/filecheck_directives.mlir*** (excerpt)
 ```mlir
 // STRICT-LABEL: func.func @square
 // STRICT: arith.addi
@@ -246,6 +249,7 @@ match to share a line with.) It has two practical jobs:
 The `SIG` group matches three pieces of `@square`'s signature, all on one
 output line:
 
+***tests/filecheck_directives.mlir*** (excerpt)
 ```mlir
 // SIG-LABEL: func.func @square(
 // SIG-SAME: %arg0: i32
@@ -260,6 +264,7 @@ echo $?   # prints 0
 
 The `SIGBAD` group demands something that is on the *next* line:
 
+***tests/filecheck_directives.mlir*** (excerpt)
 ```mlir
 // SIGBAD-LABEL: func.func @square(
 // SIGBAD-SAME: arith.muli
@@ -295,6 +300,7 @@ rename values — what matters is that the value *defined here* is the one
 `@square`: both operands of the multiply are the same value, and the value
 returned is the multiply's result —
 
+***tests/filecheck_directives.mlir*** (excerpt)
 ```mlir
 // CAP-LABEL: func.func @square(
 // CAP: %[[V:.*]] = arith.muli %[[A:.*]], %[[A]] : i32
@@ -328,9 +334,13 @@ up in the real test in the next section. There are more —
 
 ## 4. Step: read a real test, and run it by hand
 
-Now the primer pays off. Here is the simplest real test in this repo,
-[`tests/ctlz_simple.mlir`](../tests/ctlz_simple.mlir):
+Now the primer pays off. A real test file is section 1's idea in the
+flesh: it *is* the input program, annotated — a `RUN:` comment holding the
+shell command lit will execute, and `CHECK` directives that FileCheck will
+enforce against that command's output. Here is the simplest real test in
+this repo, [`tests/ctlz_simple.mlir`](../tests/ctlz_simple.mlir):
 
+***tests/ctlz_simple.mlir***
 ```mlir
 // RUN: mlir-opt %s --convert-math-to-funcs=convert-ctlz | FileCheck %s
 
@@ -412,6 +422,7 @@ reporting results — is automation around this one pipeline.
 [`tests/ctlz.mlir`](../tests/ctlz.mlir), pins down the *entire* generated
 function. Its check block begins like this:
 
+***tests/ctlz.mlir*** (excerpt)
 ```mlir
 // CHECK-LABEL:   func.func @main(
 // CHECK-SAME:                       %[[VAL_0:.*]]: i32
@@ -427,6 +438,7 @@ passed to the generated ctlz call. The dense middle of the file is captures
 all the way down — note how `%[[ARG]]` and `%[[N]]`, captured many lines
 earlier, are asserted to be the loop's `iter_args`:
 
+***tests/ctlz.mlir*** (excerpt)
 ```mlir
 // CHECK:           %[[FOR_RET:.*]]:2 = scf.for %[[I:.*]] = %[[C_1INDEX]] to %[[C_32INDEX]] step %[[C_1INDEX]]
 // CHECK:               iter_args(%[[ARG_ITER:.*]] = %[[ARG]], %[[N_ITER:.*]] = %[[N]]) -> (i32, i32) {
@@ -542,8 +554,14 @@ Everything above describes single files. This repo automates it so that
 pieces make that work:
 
 **(a) [`tests/BUILD`](../tests/BUILD)** bundles the needed tools into a
-`test_utilities` filegroup, then calls one macro:
+`test_utilities` filegroup, then calls one macro. One rule of thumb
+governs the filegroup: **every program a `RUN:` line invokes must be in
+this list** — Bazel tests run sandboxed, so a tool that isn't declared
+simply doesn't exist there, and the test fails with a "binary not found"
+error. (The article hits exactly this when adding `mlir-cpu-runner` for
+section 8's functional test.) Read the `data` list with that rule in mind:
 
+***tests/BUILD*** (excerpt)
 ```python
 filegroup(
     name = "test_utilities",
@@ -568,17 +586,15 @@ filegroup(
 glob_lit_tests()
 ```
 
-The rule of thumb: **every program a `RUN:` line invokes must be in this
-list** — Bazel tests run sandboxed, so a tool that isn't declared simply
-doesn't exist there, and the test fails with a "binary not found" error.
-(The article hits exactly this when adding `mlir-cpu-runner` for section 8's
-functional test.) You can see the tutorial's future in the list:
-`tutorial-opt` (this repo's own pass driver, from Tutorial 3 on),
-`mlir-translate`, `llc`, and `clang` (the path to a native executable,
-Tutorial 11). The two oddballs, `not` and `count`, are tiny LLVM test
-helpers: `not` inverts a command's exit code, so a `RUN` line can assert
-that a command *fails* — that is how section 3's demo file checks in its
-two deliberately-failing groups, e.g.
+Entry by entry:
+
+- **The tutorial's future is visible in the list:** `tutorial-opt` (this
+  repo's own pass driver, from Tutorial 3 on), `mlir-translate`, `llc`,
+  and `clang` (the path to a native executable, Tutorial 11).
+- **The two oddballs, `not` and `count`, are tiny LLVM test helpers:**
+  `not` inverts a command's exit code, so a `RUN` line can assert that a
+  command *fails* — that is how section 3's demo file checks in its two
+  deliberately-failing groups, e.g.
 
 ```
 // RUN: mlir-opt %s | not FileCheck %s --check-prefix=STRICT
@@ -612,6 +628,7 @@ step substitutes concrete paths; we'll meet that in a moment. Bazel has no
 configure step, so the paths must be discovered *at runtime*.) The whole
 file, minus comments:
 
+***tests/lit.cfg.py*** (excerpt)
 ```python
 import os
 from pathlib import Path
@@ -775,6 +792,7 @@ written), calls a function you name, and prints the result to stdout.
 ctlz of 7 is 29 (7 as an i32 is `00000000 00000000 00000000 00000111` —
 29 leading zeros):
 
+***tests/ctlz_runner.mlir*** (excerpt)
 ```mlir
 // RUN: mlir-opt %s \
 // RUN:   -pass-pipeline="builtin.module( \

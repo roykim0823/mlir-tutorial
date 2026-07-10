@@ -1,3 +1,5 @@
+// Preserved Tutorial 3 code, pre-tablegen (tutorial 3 section 8); the
+// current version is lib/Transform/Arith. See README.md in this directory.
 #ifndef TUTORIAL_CODE_03_MULTOADD_H_
 #define TUTORIAL_CODE_03_MULTOADD_H_
 

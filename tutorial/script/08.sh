@@ -3,12 +3,17 @@
 # run relative to this script's location (tutorial/script/), so it works from any cwd
 cd "$(dirname "$0")" || exit 1
 
+# print a section banner. The { ...; } 2>/dev/null redirections keep set -x
+# trace noise out of the output: inside the function for its own commands,
+# and at each call site ({ step "..."; } 2>/dev/null) for the call itself.
+step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
+
 set -x  # turn on command echoing
 TESTS="../../tests"
 TUTORIAL_OPT="${TUTORIAL_OPT:-../../bazel-bin/tools/tutorial-opt}"
 SCRATCH=$(mktemp -d)
 
-# 4. Step: catch all three layers in the act (08-verifiers.md)
+{ step "4. Step: catch all three layers in the act (08-verifiers.md)"; } 2>/dev/null
 # The markdown shows the poly.eval lines and their real error output; the
 # implied command is $TUTORIAL_OPT with no passes (verification runs after
 # parsing). Each snippet is wrapped in a full function here.
@@ -46,7 +51,7 @@ EOF
 # expected to FAIL: 'poly.eval' op argument point must be a 32-bit integer, or a complex number
 $TUTORIAL_OPT $SCRATCH/eval_si32.mlir
 
-# 5. Step: testing error messages (08-verifiers.md)
+{ step "5. Step: testing error messages"; } 2>/dev/null
 cat $TESTS/poly_verifier.mlir
 
 # manual replay of the test's lit RUN line: tutorial-opt %s 2>%t; FileCheck %s < %t

@@ -1,3 +1,5 @@
+// Preserved Tutorial 3 code, pre-tablegen (tutorial 3 section 8); the
+// current version is lib/Transform/Arith. See README.md in this directory.
 #include "tutorial/code/03/MulToAdd.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -72,7 +74,7 @@ struct PeelFromMul : public OpRewritePattern<MulIOp> {
 
     ConstantOp newConstant = rewriter.create<ConstantOp>(
         rhsDefiningOp.getLoc(),
-        rewriter.getIntegerAttr(rhs.getType(), value - 1));
+        rewriter.getIntegerAttr(rhs.getType(), value - 1));  // value - 1 instead of value / 2
     MulIOp newMul = rewriter.create<MulIOp>(op.getLoc(), lhs, newConstant);
     AddIOp newAdd = rewriter.create<AddIOp>(op.getLoc(), newMul, lhs);
 

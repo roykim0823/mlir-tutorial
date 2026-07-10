@@ -416,6 +416,7 @@ reads like review. The transformation is Tutorial 3's: expand
 power-of-two multiplications by halving, peel everything else. The core
 (one variant of each pattern; the file has both — see below):
 
+***lib/Transform/Arith/MulToAdd.pdll*** (excerpt)
 ```pdll
 #include "mlir/Dialect/Arith/IR/ArithOps.td"
 
@@ -456,14 +457,20 @@ Pattern PeelFromMulRhs with benefit(1) {
 }
 ```
 
-You can name every construct now: an ODS include (3.2), a native inline
-constraint (3.7 #2), two external constraints *with results* (3.7 #3 —
-and there's PDLL's sharpest current limit: *arithmetic on static values
-has no in-language spelling*, so `value / 2` must live in C++), nested
-op matching with an attribute bind (3.5), benefits dividing labor
-exactly as in Tutorial 3 (halving at 2 beats peeling at 1), and
-`rewrite ... with {}` blocks building the replacement (3.8). Hold it
-against Tutorial 3's 35-line `matchAndRewrite`: the match is the
+You can name every construct now, piece by piece:
+
+- an ODS include (3.2);
+- a native inline constraint, `IsPowerOfTwo` (3.7 #2);
+- two external constraints *with results*, `Halve` and `MinusOne`
+  (3.7 #3 — and there's PDLL's sharpest current limit: *arithmetic on
+  static values has no in-language spelling*, so `value / 2` must live
+  in C++);
+- nested op matching with an attribute bind (3.5);
+- benefits dividing labor exactly as in Tutorial 3 (halving at 2 beats
+  peeling at 1);
+- `rewrite ... with {}` blocks building the replacement (3.8).
+
+Hold it against Tutorial 3's 35-line `matchAndRewrite`: the match is the
 *shape*, no `getDefiningOp`, no null checks, constraints beside the
 things they constrain.
 
@@ -490,6 +497,7 @@ The C++ side ([`MulToAddPdll.cpp`](../lib/Transform/Arith/MulToAddPdll.cpp))
 has two jobs. First, the external constraint implementations — here is
 `Halve`, in the generic `PDLValue` signature from 3.7:
 
+***lib/Transform/Arith/MulToAddPdll.cpp*** (excerpt)
 ```cpp
 LogicalResult halveImpl(PatternRewriter &rewriter, PDLResultList &results,
                         ArrayRef<PDLValue> args) {
@@ -506,10 +514,20 @@ void registerNativeConstraints(RewritePatternSet &patterns) {
 }
 ```
 
-(The article notes this signature was discoverable only from upstream
-comments and unit tests — consider it documented now.) Second, the pass
-body, near-identical to Tutorial 3's:
+Read it in execution order: the interpreter hands the constraint its
+arguments as `PDLValue` boxes, so `args[0].cast<Attribute>()` unboxes
+the attribute (3.7's dynamically-typed box, met for real); ordinary C++
+then extracts the integer and builds the halved attribute; and because
+`Halve` is a constraint *returning a value*, the result travels back by
+pushing it onto `results`, with `success()` meaning the constraint held.
+`registerNativeConstraints` then ties the `.pdll` declarations to these
+implementations by name. (The article notes this signature was
+discoverable only from upstream comments and unit tests — consider it
+documented now.)
 
+Second, the pass body, near-identical to Tutorial 3's:
+
+***lib/Transform/Arith/MulToAddPdll.cpp*** (excerpt)
 ```cpp
 struct MulToAddPdll : impl::MulToAddPdllBase<MulToAddPdll> {
   using MulToAddPdllBase::MulToAddPdllBase;
@@ -542,6 +560,7 @@ ones needed our manual `registerNativeConstraints`). That's why the
 pass's tablegen declaration (Tutorial 4 machinery, in
 [`Passes.td`](../lib/Transform/Arith/Passes.td)) lists
 
+***lib/Transform/Arith/Passes.td*** (excerpt)
 ```tablegen
 let dependentDialects = [
   "mlir::pdl::PDLDialect",
@@ -619,6 +638,7 @@ Bazel ([`lib/Transform/Arith/BUILD`](../lib/Transform/Arith/BUILD)) —
 Tutorial 4's `gentbl_cc_library`, with one twist — the generator binary
 is swapped:
 
+***lib/Transform/Arith/BUILD*** (excerpt)
 ```python
 gentbl_cc_library(
     name = "MulToAddPdllIncGen",
@@ -632,6 +652,7 @@ gentbl_cc_library(
 CMake ([`CMakeLists.txt`](../lib/Transform/Arith/CMakeLists.txt)) has a
 dedicated helper:
 
+***lib/Transform/Arith/CMakeLists.txt*** (excerpt)
 ```cmake
 add_mlir_pdll_library(MulToAddPdllIncGen
   MulToAdd.pdll

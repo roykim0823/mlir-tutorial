@@ -29,8 +29,10 @@ Deliberate deviations from the article's original files (this snapshot
 follows the *tutorial*, which follows the current repo, where they
 disagree): include paths say `tutorial/code/03/...` instead of
 `lib/Transform/...`; a `multiplicatoins` typo in the article-era
-`MulToAdd` description is fixed; the pattern bodies match the current
-`lib/` code character for character.
+`MulToAdd` description is fixed; each file opens with an orientation
+comment (not in the article) saying what it is; and the pattern bodies
+match the current `lib/` code apart from small clarifying comments added
+in this copy.
 
 Build and run:
 
@@ -48,6 +50,8 @@ bazel-bin/tutorial/code/03/tutorial-opt-03 tests/mul_to_add.mlir --mul-to-add
 Verified: on `tests/affine_loop_unroll.mlir` and `tests/mul_to_add.mlir`,
 the binary's output is byte-identical to `tutorial-opt`'s for all three
 passes (checked with `diff`), and it passes the same FileCheck assertions.
-Its `--help` lists the three flags with the same descriptions (plus the
-hundreds of upstream passes, but minus `--mul-to-add-pdll`, which belongs
-to Tutorial 13's code).
+Its `--help` lists the three flags with the same descriptions — and *only*
+those three passes: like the article-era original, this driver has no
+`registerAllPasses()`, so the hundreds of upstream passes (and
+`--mul-to-add-pdll`, Tutorial 13's code) that today's `tutorial-opt`
+exposes are absent.

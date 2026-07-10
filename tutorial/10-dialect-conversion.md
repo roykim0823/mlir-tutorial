@@ -85,8 +85,12 @@ The pass is declared in
 loaded — Tutorial 4 §2's rule, now with real stakes). The interesting
 code is in
 [`PolyToStandard.cpp`](../lib/Conversion/PolyToStandard/PolyToStandard.cpp),
-starting with the type rule:
+starting with the type rule. A `TypeConverter` is the first of section
+1's four moving parts — the object that "declares which types change and
+how" — and using one amounts to subclassing it and registering one
+callback per type rule via `addConversion`:
 
+***lib/Conversion/PolyToStandard/PolyToStandard.cpp*** (excerpt)
 ```cpp
 class PolyToStandardTypeConverter : public TypeConverter {
  public:
@@ -119,8 +123,13 @@ cancel.)
 
 ## 3. Conversion patterns
 
-Here's the add lowering, in full:
+A conversion pattern is Tutorial 3's rewrite pattern re-based onto the
+framework: still one class per op, still a `matchAndRewrite` whose job
+is to build replacement ops and replace the root — but it subclasses
+`OpConversionPattern` instead of `OpRewritePattern`, and that changes
+the method's signature. Here's the add lowering, in full:
 
+***lib/Conversion/PolyToStandard/PolyToStandard.cpp*** (excerpt)
 ```cpp
 struct ConvertAdd : public OpConversionPattern<AddOp> {
   using OpConversionPattern::OpConversionPattern;
@@ -136,8 +145,8 @@ struct ConvertAdd : public OpConversionPattern<AddOp> {
 };
 ```
 
-Same shape as Tutorial 3's patterns, with two differences that carry the
-whole framework:
+Both differences sit in that signature, and they carry the whole
+framework:
 
 - **The `OpAdaptor` parameter** (an alias for `AddOp::Adaptor`, generated
   code you met in Tutorial 7 as `FoldAdaptor`'s sibling). Its accessors —
@@ -270,8 +279,13 @@ re-implement your own dialect's plumbing in every pattern.
 
 ## 4. Legality: the ConversionTarget
 
-The pass body (`runOnOperation`) assembles everything:
+The pass body (`runOnOperation`) is where section 1's moving parts
+meet: it states the legality contract as a `ConversionTarget`, collects
+section 3's patterns into a `RewritePatternSet` (constructed with the
+type converter), and hands the lot to `applyPartialConversion`, the
+framework's driver:
 
+***lib/Conversion/PolyToStandard/PolyToStandard.cpp*** (excerpt)
 ```cpp
 ConversionTarget target(*context);
 target.addIllegalDialect<PolyDialect>();
@@ -300,6 +314,7 @@ signatures like `(%arg0: !poly.poly<10>)` — the type hides inside
 never fire, but the contract isn't met until those signatures change
 too. Upstream provides drop-in helpers, one per structural-op family:
 
+***lib/Conversion/PolyToStandard/PolyToStandard.cpp*** (excerpt)
 ```cpp
 populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(
     patterns, typeConverter);

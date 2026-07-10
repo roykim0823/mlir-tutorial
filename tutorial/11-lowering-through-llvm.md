@@ -39,6 +39,7 @@ Tutorial 2 §8 lowered `math.ctlz` to executable form with a five-pass
 that string is not a lifestyle. The fix is the last feature of
 `tutorial-opt.cpp` (Tutorial 3 §3 showed everything else):
 
+***tools/tutorial-opt.cpp*** (excerpt)
 ```cpp
 mlir::PassPipelineRegistration<>(
     "poly-to-llvm", "Run passes to lower the poly dialect to LLVM",
@@ -61,10 +62,14 @@ war stories (section 6).
 
 ## 2. The pipeline, stage by stage
 
-Here is `polyToLLVMPipelineBuilder` from
-[`tools/tutorial-opt.cpp`](../tools/tutorial-opt.cpp), grouped into its
-five logical stages:
+A pipeline builder is exactly the kind of function section 1's
+registration wraps: it receives an `OpPassManager` and appends passes
+with `addPass`, in the order they will run — so reading it top to bottom
+is reading the compilation strategy. Here is `polyToLLVMPipelineBuilder`
+from [`tools/tutorial-opt.cpp`](../tools/tutorial-opt.cpp), grouped into
+its five logical stages:
 
+***tools/tutorial-opt.cpp*** (excerpt)
 ```cpp
 void polyToLLVMPipelineBuilder(mlir::OpPassManager &manager) {
   // Stage 1: leave poly (Tutorial 10)
@@ -239,6 +244,7 @@ The test program,
 [`tests/poly_to_llvm.mlir`](../tests/poly_to_llvm.mlir) — note it
 exercises *every* `poly` op:
 
+***tests/poly_to_llvm.mlir*** (excerpt)
 ```mlir
 func.func @test_poly_fn(%arg : i32) -> i32 {
   %tens = tensor.splat %arg : tensor<10xi32>
@@ -255,6 +261,7 @@ func.func @test_poly_fn(%arg : i32) -> i32 {
 and a perfectly ordinary C caller,
 [`tests/poly_to_llvm_main.c`](../tests/poly_to_llvm_main.c):
 
+***tests/poly_to_llvm_main.c***
 ```c
 #include <stdio.h>
 
@@ -334,8 +341,13 @@ compiler's work in one screen.
 
 ## 5. The lit test: five RUN lines to a running binary
 
-The RUN header of `poly_to_llvm.mlir` scripts exactly section 4:
+Recall from Tutorial 2 that lit executes each `// RUN:` line as a shell
+command in a per-test sandbox, substituting placeholders like `%s` and
+`%t` — so a sequence of RUN lines is a small script. The RUN header of
+`poly_to_llvm.mlir` uses that to script exactly section 4 — compile,
+link, run, check the printed output:
 
+***tests/poly_to_llvm.mlir*** (excerpt)
 ```mlir
 // RUN: tutorial-opt --poly-to-llvm %s | mlir-translate --mlir-to-llvmir | llc --relocation-model=pic -filetype=obj > %t
 // RUN: clang -c %project_source_dir/tests/poly_to_llvm_main.c

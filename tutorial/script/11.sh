@@ -3,6 +3,11 @@
 # run relative to this script's location (tutorial/script/), so it works from any cwd
 cd "$(dirname "$0")" || exit 1
 
+# print a section banner. The { ...; } 2>/dev/null redirections keep set -x
+# trace noise out of the output: inside the function for its own commands,
+# and at each call site ({ step "..."; } 2>/dev/null) for the call itself.
+step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
+
 set -x  # turn on command echoing
 TESTS="../../tests"
 TUTORIAL_OPT="${TUTORIAL_OPT:-../../bazel-bin/tools/tutorial-opt}"
@@ -15,7 +20,7 @@ MLIR_TRANSLATE="../../bazel-bin/external/+_repo_rules+llvm-project/mlir/mlir-tra
 # dir -- the markdown says to run section 4 "from a scratch directory".
 SCRATCH=$(mktemp -d)
 
-# 2. The pipeline, stage by stage (11-lowering-through-llvm.md)
+{ step "2. The pipeline, stage by stage (11-lowering-through-llvm.md)"; } 2>/dev/null
 # The running example @add_ct (degree 4), watched at three points along the
 # pipeline. Stage boundaries follow the markdown's stage numbering.
 cat > $SCRATCH/add_ct.mlir <<'EOF'
@@ -36,10 +41,10 @@ $TUTORIAL_OPT $SCRATCH/add_ct.mlir \
 # five-argument memref calling convention in @add_ct's signature
 $TUTORIAL_OPT $SCRATCH/add_ct.mlir --poly-to-llvm
 
-# 3. Step: run the pipeline (11-lowering-through-llvm.md)
+{ step "3. Step: run the pipeline"; } 2>/dev/null
 $TUTORIAL_OPT $TESTS/poly_to_llvm.mlir --poly-to-llvm
 
-# 4. Step: out of MLIR, into an executable (11-lowering-through-llvm.md)
+{ step "4. Step: out of MLIR, into an executable"; } 2>/dev/null
 # 4.1. MLIR -> LLVM IR (textual): leave MLIR-land
 $TUTORIAL_OPT $TESTS/poly_to_llvm.mlir --poly-to-llvm \
   | $MLIR_TRANSLATE --mlir-to-llvmir > $SCRATCH/poly_fn.ll

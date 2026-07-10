@@ -1,3 +1,5 @@
+// Preserved Tutorial 3 code, pre-tablegen (tutorial 3 section 4); the
+// current version is lib/Transform/Affine. See README.md in this directory.
 #ifndef TUTORIAL_CODE_03_AFFINEFULLUNROLL_H_
 #define TUTORIAL_CODE_03_AFFINEFULLUNROLL_H_
 

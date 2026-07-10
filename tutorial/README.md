@@ -56,8 +56,12 @@ Conventions:
 - **Run from anywhere** — each script `cd`s to its own directory first, so
   `./tutorial/script/07.sh` and `cd tutorial/script && ./07.sh` both work.
   Commands echo as they run (`set -x`).
-- A comment above each command names the **markdown section it comes from**,
-  so the script doubles as an index of the tutorial's commands.
+- Each markdown section's commands run under a **printed banner**
+  (`### 6. Step: run the unrolling pass ###`), emitted by a small `step`
+  helper whose `{ ...; } 2>/dev/null` wrapping keeps the banner itself out
+  of the `set -x` trace — so the output reads as an index of the
+  tutorial's sections. Sections whose commands are all skipped (see below)
+  keep plain comments instead of a banner.
 - **Prerequisites:** the upstream LLVM tools (`mlir-opt`, `FileCheck`,
   `mlir-pdll`, ...) on `$PATH`, and for tutorials 3+ a built `tutorial-opt`.
   The scripts default to the Bazel output `bazel-bin/tools/tutorial-opt`;

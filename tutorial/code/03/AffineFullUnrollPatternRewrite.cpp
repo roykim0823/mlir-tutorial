@@ -1,3 +1,5 @@
+// Preserved Tutorial 3 code, pre-tablegen (tutorial 3 section 7); the
+// current version is lib/Transform/Affine. See README.md in this directory.
 #include "tutorial/code/03/AffineFullUnrollPatternRewrite.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
