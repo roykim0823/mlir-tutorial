@@ -1,17 +1,15 @@
-# Tutorial 8: Verifiers
+# Chapter 8: Verifiers
 
-This is a step-by-step companion to the article
-[Verifiers](https://jeremykun.com/2023/09/13/mlir-verifiers/).
-[Tutorial 7](07-folders-and-constant-propagation.md) taught `poly` to
-compute; this tutorial teaches it to say **no**. Verifiers are the checks
+[Chapter 7](07-folders-and-constant-propagation.md) taught `poly` to
+compute; this chapter teaches it to say **no**. Verifiers are the checks
 that keep every MLIR program well-formed — and they finally explain the
 last mysteries in `PolyOps.td`: `let hasVerifier = 1` and that custom
 `Has32BitArguments` trait whose error message you've now tripped twice
-(Tutorial 5 exercise 3, Tutorial 6 §2).
+(Chapter 5 exercise 3, Chapter 6 §2).
 
-The centerpiece of this tutorial is an experiment the article doesn't
-run: feeding `poly.eval` three *differently* wrong inputs to catch each
-of MLIR's **three verification layers** red-handed, one at a time.
+The centerpiece of this chapter is an experiment: feeding `poly.eval`
+three *differently* wrong inputs to catch each of MLIR's **three
+verification layers** red-handed, one at a time.
 
 **What you will learn:**
 
@@ -24,8 +22,8 @@ of MLIR's **three verification layers** red-handed, one at a time.
 - How to test error messages with lit + FileCheck.
 - How to choose between a type constraint, a trait, and an op verifier.
 
-**Prerequisites:** [Tutorial 6](06-using-traits.md) (traits) and
-[Tutorial 5](05-defining-a-new-dialect.md) (the `poly.eval` op). Same
+**Prerequisites:** [Chapter 6](06-using-traits.md) (traits) and
+[Chapter 5](05-defining-a-new-dialect.md) (the `poly.eval` op). Same
 build setup (`$TUTORIAL_OPT`).
 
 ---
@@ -34,7 +32,7 @@ build setup (`$TUTORIAL_OPT`).
 
 A **verifier** checks that an operation is well-formed: operand types
 make sense, attributes are in range, invariants hold. You have been
-watching verifiers work since Tutorial 1 §3, where `mlir-opt` with no
+watching verifiers work since Chapter 1 §3, where `mlir-opt` with no
 passes rejected an `i32`/`i64` mix — that error came from a verifier.
 
 The detail that makes verifiers strategically important is *when* they
@@ -45,7 +43,7 @@ IR too. This buys two things:
 
 - Bugs surface at the pass that introduced them, not ten passes later as
   a mysterious crash.
-- Passes get to be *simpler*: Tutorial 7's `EvalOp` handling never
+- Passes get to be *simpler*: Chapter 7's `EvalOp` handling never
   worried about a floating-point evaluation point, because verified IR
   can't contain one. An invariant checked once in a verifier is an edge
   case deleted from every pass that touches the op.
@@ -54,22 +52,26 @@ The word "verifier" actually names three layers, all of which you have
 already written without necessarily noticing:
 
 1. **ODS invariants** — generated from your tablegen `arguments` /
-   `results` constraints (Tutorial 5). `IntOrComplex:$point` *is* a
+   `results` constraints (Chapter 5). `IntOrComplex:$point` *is* a
    verifier.
-2. **Trait verifiers** — any trait's `verifyTrait` hook (Tutorial 6);
+2. **Trait verifiers** — any trait's `verifyTrait` hook (Chapter 6);
    `SameOperandsAndResultType` rejecting mixed types *is* a verifier.
 3. **Custom op verifiers** — arbitrary C++ you write for one op:
-   `let hasVerifier = 1`. This tutorial's new material.
+   `let hasVerifier = 1`. This chapter's new material.
 
 They run in that order, and the order is observable — section 4 proves
-it with an experiment.
+it with an experiment. (The official docs cover
+[verifiers for operations](https://mlir.llvm.org/docs/DefiningDialects/Operations/#custom-verifier-code)
+and, separately,
+[verifiers for attributes and types](https://mlir.llvm.org/docs/DefiningDialects/AttributesAndTypes/#verification)
+— this chapter's subject is the former.)
 
 ## 2. A custom op verifier for `poly.eval`
 
-`poly.eval` evaluates a polynomial at a point (Tutorial 5 §5). Its ODS
+`poly.eval` evaluates a polynomial at a point (Chapter 5 §5). Its ODS
 constraint `IntOrComplex` admits *any* integer width — but our semantics
-(coefficients mod 2³², Tutorial 5 §1) only make sense evaluating at a
-32-bit point, or a complex number (for Tutorial 9's conjugation
+(coefficients mod 2³², Chapter 5 §1) only make sense evaluating at a
+32-bit point, or a complex number (for Chapter 9's conjugation
 identities). Widths are not something a simple type constraint
 expresses, so `PolyOps.td` declares:
 
@@ -86,7 +88,7 @@ def Poly_EvalOp : Op<Poly_Dialect, "eval",
 `::llvm::LogicalResult verify();` on the generated `EvalOp` class — that
 *you* must implement. The contract is small: `verify()` is an ordinary
 member method on the op class — so it has full access to typed accessors
-like `getPoint()` — that inspects the op and returns Tutorial 3's
+like `getPoint()` — that inspects the op and returns Chapter 3's
 `LogicalResult`. The implementation, from
 [`lib/Dialect/Poly/PolyOps.cpp`](../lib/Dialect/Poly/PolyOps.cpp):
 
@@ -123,7 +125,7 @@ conveniently *returns* a failure, so the idiom is
 ## 3. A custom trait verifier
 
 The width rule "integer operands must be 32-bit" isn't really about
-`eval` — it's a policy you might want on many ops. Tutorial 6 said traits
+`eval` — it's a policy you might want on many ops. Chapter 6 said traits
 carry verification routines; now we write one. Two pieces. In
 [`PolyOps.td`](../lib/Dialect/Poly/PolyOps.td), declare the trait's
 existence and C++ home:
@@ -137,11 +139,11 @@ def Has32BitArguments : NativeOpTrait<"Has32BitArguments"> {
 
 `NativeOpTrait` means "the implementation is hand-written C++ — tablegen,
 just splice the name into the generated op's trait list" (you can see it
-spliced last in Tutorial 6 §4's generated `AddOp` mixin list, for `add`'s
+spliced last in Chapter 6 §4's generated `AddOp` mixin list, for `add`'s
 traits; `eval` gets this one).
 
 On the C++ side, a hand-written trait has a fixed shape: a class
-template over `ConcreteType` (Tutorial 4's CRTP yet again), deriving
+template over `ConcreteType` (Chapter 4's CRTP yet again), deriving
 from `OpTrait::TraitBase`, that the generated op class mixes in — and
 its verification hook is a *static* `verifyTrait(Operation *op)`, which
 receives a **generic** `Operation*`, not an `EvalOp`, because the same
@@ -201,7 +203,7 @@ error: 'poly.eval' op operand #1 must be integer or complex-type, but got 'f32'
 ```
 
 That message was *generated* — nobody wrote it; it's the `IntOrComplex`
-constraint from Tutorial 5 §5 doing its verifier job, with the constraint
+constraint from Chapter 5 §5 doing its verifier job, with the constraint
 description interpolated.
 
 **Layer 2 — trait verifier.** An `i16` point is an integer (ODS ✓) but
@@ -269,7 +271,7 @@ Three details worth stealing for your own tests:
   (nonzero exit), and with a plain pipe lit would report the RUN line
   itself as failed. The `;` swallows the expected failure, then FileCheck
   judges the diagnostic text.
-- The CHECK line matches a *substring* of the error, loosely — Tutorial
+- The CHECK line matches a *substring* of the error, loosely — Chapter
   2's loose-vs-strict tradeoff, applied to diagnostics (error wording
   changes more often than op syntax).
 - The comment is candid about the brittleness: with an `i64` input both
@@ -290,37 +292,26 @@ llvm-lit -sv build-ninja/tests --filter poly_verifier   # CMake
 
 ## 6. Choosing your layer
 
-With three places to put a check, a decision rule (distilled from the
-article plus the experiment):
+With three places to put a check, a decision rule (distilled from
+experience plus the experiment):
 
 - **Type constraint (ODS)** — when the rule is "operand must be
-  such-and-such type", expressible with existing constraint combinators.
+  such-and-such type", expressible with existing
+  [constraint](https://mlir.llvm.org/docs/DefiningDialects/Operations/#constraints)
+  combinators (the docs describe traits as subclasses of a `Constraint`
+  base class — constraints and traits are one family in ODS).
   Free error messages, visible in the `.td`, also enforced at *build*
   sites (generated builders). First choice.
 - **Trait verifier** — when the rule spans *multiple ops* and needs only
   generic `Operation*`-level inspection ("all integer operands 32-bit").
-  Reusable; but casting-averse and blind to op specifics — the article
-  notes supporting op-specific arguments from a trait requires "awkward
-  casting", at which point...
+  Reusable; but casting-averse and blind to op specifics — supporting
+  op-specific arguments from a trait requires awkward casting, at which
+  point...
 - **Op verifier** — when the rule is op-specific, multi-operand, or needs
   the typed accessors (`getPoint()`). Maximum power, zero reuse.
 
 And one non-choice: never enforce semantic invariants in *passes*. The
 verifier is the single place an invariant lives; passes assume it.
-
-## Differences from the original article
-
-- The article's `EvalOp::verify` checks only `isInteger(32)`; the repo's
-  current version also admits **complex** points (`ComplexType`) — that
-  arrived with Tutorial 9's canonicalization patterns, which manipulate
-  evaluations at complex conjugate points. Its error message grew the
-  ", or a complex number" suffix accordingly.
-- Similarly, the trait now skips complex operands via
-  `isIntOrIndex()`-gated checks, so the two layers coexist with the
-  complex-eval feature.
-- Style: the article calls `getPoint().getType().IsInteger(32)`; current
-  code names the intermediate and uses `isSignlessInteger(32)` — which is
-  precisely what makes the section-4 `si32` experiment possible.
 
 ## Where to go next
 
@@ -329,7 +320,7 @@ teaching MLIR *algebraic identities* — that `x² − y²` is `(x+y)(x−y)`
 (one multiplication instead of two), or that conjugation commutes with
 evaluation. Those are rewrite patterns attached to canonicalization, and
 half of them are written in *tablegen*, not C++:
-[Tutorial 9: Canonicalizers and Declarative Rewrite Patterns](09-canonicalizers-and-drr.md)
+[Chapter 9: Canonicalizers and Declarative Rewrite Patterns](09-canonicalizers-and-drr.md)
 — where `let hasCanonicalizer = 1` and `PolyPatterns.td` get their turn.
 
 **Exercises**
@@ -343,7 +334,7 @@ half of them are written in *tablegen*, not C++:
    the trait, and which layer ultimately rejects it.
 3. Strengthen `tests/poly_verifier.mlir`: add a second function using the
    `si32` trick so the file distinguishes the two messages, with separate
-   `CHECK` prefixes (Tutorial 2 §3's technique).
+   `CHECK` prefixes (Chapter 2 §3's technique).
 4. Write (on paper) a `verifyTrait` for a hypothetical
    `HasMatchingDegrees` trait that checks all `!poly.poly<N>` operands
    share one `N`. What stops you from using `getDegreeBound()` directly,
@@ -352,6 +343,6 @@ half of them are written in *tablegen*, not C++:
 5. Predict, then check: does the verifier run on IR that only *parses*
    (`$TUTORIAL_OPT` with no passes, as in section 4), and does it run
    again after `--canonicalize`? Design an experiment with a folder that
-   would produce illegal IR if unguarded (Tutorial 7's `from_tensor` fold
+   would produce illegal IR if unguarded (Chapter 7's `from_tensor` fold
    is a good subject: what if the tensor is longer than the degree
    bound?).

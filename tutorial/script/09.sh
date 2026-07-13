@@ -12,8 +12,8 @@ set -x  # turn on command echoing
 TESTS="../../tests"
 TUTORIAL_OPT="${TUTORIAL_OPT:-../../bazel-bin/tools/tutorial-opt}"
 
-{ step "3. The pattern in C++ (the article's version) (09-canonicalizers-and-drr.md)"; } 2>/dev/null
-# The article-era C++ DifferenceOfSquares pattern is kept buildable in
+{ step "3. The pattern in C++ (the original version) (09-canonicalizers-and-drr.md)"; } 2>/dev/null
+# The original C++ DifferenceOfSquares pattern is kept buildable in
 # tutorial/code/09 as its own pass. Same rewrite as the DRR version below;
 # the other-uses test function is left alone by the hasOneUse guard.
 # skipped: bazel build //tutorial/code/09:tutorial-opt-09 (build command; $TUTORIAL_OPT_09 is already built)

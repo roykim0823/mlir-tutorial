@@ -1,15 +1,15 @@
-# Tutorial 13: Defining Patterns with PDLL
+# Chapter 13: Defining Patterns with PDLL
 
-This is a step-by-step companion to the article
-[Defining Patterns with PDLL](https://www.jeremykun.com/2024/08/04/mlir-pdll/),
-merged with the official [PDLL documentation](https://mlir.llvm.org/docs/PDLL/)
-— so it doubles as a language tutorial: section 3 teaches PDLL from
-scratch, hands-on, before section 4 applies it to this repo. It is the
-series' epilogue: a *third* way to write rewrite patterns, after C++
-(Tutorial 3) and DRR (Tutorial 9), applied to an old friend — the
-mul-to-add transformation from Tutorial 3, reborn as `--mul-to-add-pdll`.
+This closing chapter doubles as a language tutorial built on the official
+[PDLL documentation](https://mlir.llvm.org/docs/PDLL/): section 3 teaches
+PDLL from scratch, hands-on, before section 4 applies it to this repo. It
+is the book's epilogue: a *third* way to write rewrite patterns, after C++
+([Chapter 3](03-writing-our-first-pass.md)) and DRR
+([Chapter 9](09-canonicalizers-and-drr.md)), applied to an old friend —
+the mul-to-add transformation from Chapter 3, reborn as
+`--mul-to-add-pdll`.
 
-PDLL is worth a whole tutorial not because the syntax is nicer (though it
+PDLL is worth a whole chapter not because the syntax is nicer (though it
 is), but because of a genuinely different *execution model*: PDLL
 patterns compile to **IR** — the `pdl` dialect — and are *interpreted* at
 runtime by a bytecode engine. Patterns become data. We will watch every
@@ -27,16 +27,16 @@ stage of that story in real output.
   and the build wiring in both build systems.
 - How to choose among C++, DRR, and PDLL — and PDLL's current limits.
 
-**Prerequisites:** [Tutorial 9](09-canonicalizers-and-drr.md) (DRR — the
+**Prerequisites:** [Chapter 9](09-canonicalizers-and-drr.md) (DRR — the
 contrast makes both languages clearer) and
-[Tutorial 3](03-writing-our-first-pass.md) (the original C++
+[Chapter 3](03-writing-our-first-pass.md) (the original C++
 `MulToAdd`, which you should have fresh in mind).
 
 ---
 
 ## 1. Why a third pattern language?
 
-Tutorial 9 ended with DRR looking pretty good — so why did the MLIR
+Chapter 9 ended with DRR looking pretty good — so why did the MLIR
 community build a replacement (and put DRR into maintenance mode)? Because
 DRR inherited tablegen's DAG-expression syntax, and several ordinary MLIR
 shapes don't fit a tablegen DAG:
@@ -46,8 +46,8 @@ shapes don't fit a tablegen DAG:
   `threeResultOp.output1` (or `.0`, `.1`, ...).
 - **Variadic operands and result groups** — awkward to impossible in DRR.
 - **Regions** — ops with bodies can't be matched in DRR at all.
-- **Arithmetic on static values** — Tutorial 3's `value / 2` had no DRR
-  spelling whatsoever; recall Tutorial 9's `CPred` escape hatch was
+- **Arithmetic on static values** — Chapter 3's `value / 2` had no DRR
+  spelling whatsoever; recall Chapter 9's `CPred` escape hatch was
   string-pasted C++.
 - **Readability at scale** — DRR constraints live in a list far from the
   thing they constrain; PDLL attaches them "directly on or next to the
@@ -64,20 +64,24 @@ The deeper novelty is *how patterns run*. Compare the three generations:
 
 | | authored as | becomes | executed as |
 |---|---|---|---|
-| C++ (Tut. 3) | `matchAndRewrite` | compiled object code | native code |
-| DRR (Tut. 9) | tablegen DAGs | *generated* C++ | native code |
+| C++ (Ch. 3) | `matchAndRewrite` | compiled object code | native code |
+| DRR (Ch. 9) | tablegen DAGs | *generated* C++ | native code |
 | PDLL | `.pdll` source | **`pdl` dialect IR** | **interpreted bytecode** |
 
-PDLL patterns compile to operations in the `pdl` dialect — MLIR IR that
+PDLL patterns compile to operations in the
+[`pdl` dialect](https://mlir.llvm.org/docs/Dialects/PDLOps/) (Pattern
+Descriptor Language — not to be confused with PDLL, which humorously
+stands for Pattern Descriptor Language *Language*) — MLIR IR that
 *describes matching and rewriting MLIR IR* (ops like `pdl.operation`,
 `pdl.replace` model "an operation", "a replacement"). At pass-build time
-that IR is lowered (like any other dialect!) to `pdl_interp`, a dialect
-of primitive match instructions, then to a compact bytecode that a small
-interpreter executes inside the greedy driver. Only *native constraints*
+that IR is lowered (like any other dialect!) to
+[`pdl_interp`](https://mlir.llvm.org/docs/Dialects/PDLInterpOps/), a
+dialect of primitive match instructions, then to a compact bytecode that
+a small interpreter executes inside the greedy driver. Only *native constraints*
 (section 3.7) remain as C++.
 
 Why would anyone interpret patterns instead of compiling them? Three
-arguments from the article:
+arguments:
 
 - **Extensibility**: patterns-as-data can be loaded at *runtime* — a user
   can hand your compiler new rewrite rules without rebuilding it.
@@ -85,7 +89,9 @@ arguments from the article:
   compiled C++ pattern object code.
 - **Speed, surprisingly**: all patterns are merged into one decision
   automaton (you'll *see* this in section 6), sharing common checks
-  across patterns — per a 2019 MLIR talk, constructing this merged
+  across patterns — per a 2019 MLIR talk (linked from
+  [this discussion thread](https://discourse.llvm.org/t/what-is-the-benefit-of-interpreting-pdl/80331/1)),
+  constructing this merged
   matcher is ~15× faster than compiling the same patterns as C++, and
   the maintainers claim matching itself is competitive or better.
 
@@ -93,7 +99,7 @@ arguments from the article:
 
 Everything in section 3 is meant to be *run*, and the whole loop needs
 one tool. `mlir-pdll` ships with every MLIR distribution, next to
-Tutorial 4's `mlir-tblgen` (`bazel-bin` after building any pdll target,
+Chapter 4's `mlir-tblgen` (`bazel-bin` after building any pdll target,
 `externals/llvm-project/build/bin/`, or an installed LLVM's `bin/`). Its
 interface:
 
@@ -102,7 +108,7 @@ mlir-pdll -x=mlir -I <path-to-mlir-includes> yourfile.pdll
 ```
 
 - `-I` points at the directory containing `mlir/Dialect/...` tablegen
-  files, so your `.td` includes resolve — same idea as Tutorial 4 §3's
+  files, so your `.td` includes resolve — same idea as Chapter 4 §3's
   include path (e.g. `-I externals/llvm-project/mlir/include`, or an
   installed LLVM's `include/`).
 - `-x=` selects the output: **`mlir`** (the compiled `pdl` IR — the best
@@ -111,7 +117,10 @@ mlir-pdll -x=mlir -I <path-to-mlir-includes> yourfile.pdll
   for debugging "why doesn't this mean what I wrote").
 
 Put each snippet below in a scratch `.pdll` file, run `-x=mlir`, and read
-what comes out. All outputs shown are real.
+what comes out. All outputs shown are real, produced with LLVM 20 —
+generated-code details vary slightly by LLVM version, and where the
+official docs disagree with observed behavior (e.g. printed default
+benefits), the outputs here are what the tools actually printed.
 
 ## 3. The PDLL language, step by step
 
@@ -154,7 +163,7 @@ That first line matters more than it looks:
 - `#include "mlir/Dialect/Arith/IR/ArithOps.td"` — including a
   **tablegen** file imports its ODS wholesale: every op, attribute
   constraint, and interface defined there becomes available to PDLL *by
-  name*. Tutorials 4–5's op definitions are a machine-readable contract,
+  name*. Chapters 4–5's op definitions are a machine-readable contract,
   and PDLL is a consumer. You can watch the import happen: run
   `-x=ast` on the file and the dump *begins* with dozens of
   `UserConstraintDecl`s (`APIntAttr`, ...) synthesized from arith's ODS
@@ -178,12 +187,13 @@ Pattern SomeName with benefit(10), recursion {
 
 - The name is optional (3.1's pattern had none) but names show up in the
   generated `pdl.pattern @Name` and in diagnostics — use them.
-- The body splits at the first **operation rewrite statement**
+- The body splits at the first
+  **[operation rewrite statement](https://mlir.llvm.org/docs/PDLL/#operation-rewrite-statements)**
   (`replace` / `erase` / `rewrite ... with {}`), which must be the last
   statement: everything before it is matching, everything inside it is
-  rewriting. The two-phase discipline of Tutorial 3 (inspect, *then*
+  rewriting. The two-phase discipline of Chapter 3 (inspect, *then*
   mutate), enforced grammatically.
-- **`benefit(N)`** — the pattern priority you know from Tutorials 3
+- **`benefit(N)`** — the pattern priority you know from Chapters 3
   and 9. If omitted, it defaults to the number of ops matched (deeper
   patterns win ties).
 - **`with recursion`** — opt-in for patterns that can safely apply to
@@ -196,10 +206,10 @@ Every PDLL variable is typed by the kind of IR entity it stands for:
 
 | PDLL type | C++ equivalent | you've met it as |
 |---|---|---|
-| `Attr` | `mlir::Attribute` | Tutorial 7's fold values |
+| `Attr` | `mlir::Attribute` | Chapter 7's fold values |
 | `Op` / `Op<arith.muli>` | `mlir::Operation*` / that op's class | everywhere |
-| `Type` / `TypeRange` | `mlir::Type` / `mlir::TypeRange` | Tutorial 5 |
-| `Value` / `ValueRange` | `mlir::Value` / `mlir::ValueRange` | Tutorial 3 |
+| `Type` / `TypeRange` | `mlir::Type` / `mlir::TypeRange` | Chapter 5 |
+| `Value` / `ValueRange` | `mlir::Value` / `mlir::ValueRange` | Chapter 3 |
 
 Variables get **bound** — attached to a piece of the matched IR — either
 positionally inside a match expression (`x` in `op<...>(x: Value)` means
@@ -213,14 +223,14 @@ let input: Value<someType>;        // constrain the value's MLIR type
 _: Value                           // wildcard: match, bind nothing
 ```
 
-That constraint-list form is worth savoring after Tutorial 9: `HasOneUse`
+That constraint-list form is worth savoring after Chapter 9: `HasOneUse`
 — which DRR could only express as a `CPred` C++ string in a separate
 constraint list — sits *on the variable declaration itself*.
 
 ### 3.5 Operation expressions
 
 The op expression mirrors the *generic form* of an operation from
-Tutorial 1 §3 — which you now get to write by hand:
+Chapter 1 §3 — which you now get to write by hand:
 
 ```pdll
 let root = op<my_dialect.foo>(operands: ValueRange)
@@ -235,7 +245,7 @@ Piece by piece:
 - **Operands** in parens: one `ValueRange` for everything, or individual
   `Value`s/`ValueRange`s lining up with the op's ODS operand groups.
 - **Attributes** in braces, `{name = var: Attr}` — matching an
-  attribute binds its *payload*, exactly how Tutorial 7's
+  attribute binds its *payload*, exactly how Chapter 7's
   `poly.constant` will be picked apart below.
 - **Result types** after `->`.
 - **Results** of a bound op are accessed as `someOp.resultName` (ODS
@@ -248,7 +258,7 @@ Piece by piece:
   ```
 
   the inner op expression stands for "the result of an arith.constant" —
-  compare Tutorial 3's `getDefiningOp<ConstantIntOp>()` dance: the
+  compare Chapter 3's `getDefiningOp<ConstantIntOp>()` dance: the
   backward walk through the SSA graph became *syntax*.
 
 ### 3.6 Step: grow a real pattern
@@ -289,7 +299,7 @@ Pattern EliminateAddZero {
 Verified: this compiles to a `pdl.pattern` whose match section carries
 `apply_native_constraint "IsZero"` — the C++ block will run during
 matching, and a `failure()` from it simply means "this pattern doesn't
-apply here" (Tutorial 3's `return failure()`, relocated).
+apply here" (Chapter 3's `return failure()`, relocated).
 
 One more feature, discovered by trying (the docs are quiet on it, the
 compiler is not): **repetition means equality**. Match `x − x` by
@@ -309,15 +319,17 @@ Pattern ZeroSelfSub {
 
 Verified — the generated PDL matches `"arith.subi"(%0, %0)`: one
 placeholder used twice, equality by construction. (DRR had the same
-trick in Tutorial 9's `(Poly_MulOp $x, $x)`; now you know both
+trick in Chapter 9's `(Poly_MulOp $x, $x)`; now you know both
 spellings. Also note this pattern hardcodes `i32` — handling any integer
 type properly needs the result type queried from `x`, a good exercise.)
-And you may recognize `ZeroSelfSub` itself: it's the fold Tutorial 9's
+And you may recognize `ZeroSelfSub` itself: it's the fold Chapter 9's
 exercise 3 wished `poly.sub` had, sketched here for `arith`.
 
 ### 3.7 Constraints: the full menu
 
-Three species, in increasing order of C++ involvement:
+Three species, in increasing order of C++ involvement (the
+[constraints section](https://mlir.llvm.org/docs/PDLL/#constraints-1) of
+the PDLL docs has the full details of what can be constrained):
 
 1. **PDLL-defined** — written in the language, composing match logic,
    optionally returning values (and tuples, with named elements accessed
@@ -334,7 +346,7 @@ Three species, in increasing order of C++ involvement:
 
 2. **Native, inline** — C++ in a `[{ ... }]` block (3.6's `IsZero`),
    compiled into the generated code; `rewriter` is in scope and the
-   return type is implicitly `LogicalResult`. Tutorial 9's `CPred`
+   return type is implicitly `LogicalResult`. Chapter 9's `CPred`
    comparison: same escape hatch, but a *typed function* instead of a
    string pasted into a condition.
 
@@ -403,16 +415,16 @@ variables, their constraints, inline code blocks — in tree form
 `mlir-pdll-lsp-server` (installed next to `mlir-pdll`), giving your
 editor code completion for op names straight out of included ODS,
 diagnostics as you type, and go-to-definition — same family as the
-tblgen and MLIR LSPs, and set up the same way as Tutorial 3 §12's
+tblgen and MLIR LSPs, and set up the same way as Chapter 3 §12's
 clangd.
 
 ---
 
 ## 4. The repo's patterns: MulToAdd in PDLL
 
-Now the article's material — and with section 3 behind you,
+Now the destination — and with section 3 behind you,
 [`lib/Transform/Arith/MulToAdd.pdll`](../lib/Transform/Arith/MulToAdd.pdll)
-reads like review. The transformation is Tutorial 3's: expand
+reads like review. The transformation is Chapter 3's: expand
 power-of-two multiplications by halving, peel everything else. The core
 (one variant of each pattern; the file has both — see below):
 
@@ -464,31 +476,33 @@ You can name every construct now, piece by piece:
 - two external constraints *with results*, `Halve` and `MinusOne`
   (3.7 #3 — and there's PDLL's sharpest current limit: *arithmetic on
   static values has no in-language spelling*, so `value / 2` must live
-  in C++);
+  in C++; adding arithmetic, boolean logic, and comparisons to PDLL
+  [has an RFC](https://discourse.llvm.org/t/rfc-add-arithmetic-logical-and-comparison-expressions-into-pdll/78251));
 - nested op matching with an attribute bind (3.5);
-- benefits dividing labor exactly as in Tutorial 3 (halving at 2 beats
+- benefits dividing labor exactly as in Chapter 3 (halving at 2 beats
   peeling at 1);
 - `rewrite ... with {}` blocks building the replacement (3.8).
 
-Hold it against Tutorial 3's 35-line `matchAndRewrite`: the match is the
+Hold it against Chapter 3's 35-line `matchAndRewrite`: the match is the
 *shape*, no `getDefiningOp`, no null checks, constraints beside the
 things they constrain.
 
 Two things deserve stories:
 
-**Why `Rhs` and `Lhs` variants of everything?** Tutorial 3's C++ checked
+**Why `Rhs` and `Lhs` variants of everything?** Chapter 3's C++ checked
 only the right operand, on the stated assumption that canonicalization
-moves constants rightward. The article's author got bitten here: that
+moves constants rightward. This codebase's author got bitten here: that
 normalization is a *canonicalization pattern* of `arith.muli`, and this
 pass's driver only runs *these* patterns — nobody normalizes on its
 behalf. The PDLL file owns the problem by spelling out both operand
-orders. (A Tutorial 6 aside: this is what `Commutative`-aware matching
+orders. (A Chapter 6 aside: this is what `Commutative`-aware matching
 would obviate.)
 
 **An easter egg proving 3.7's point.** The repo's `Halve` declaration
 misspells its parameter `atttr` — three t's — and nothing cares: for
-external constraints only the *types* travel; parameter names are
-documentation. (Verified: fixing the typo and regenerating produces
+external constraints only the *types* travel (via the documented
+[mapping from PDLL types to C++ types](https://mlir.llvm.org/docs/PDLL/#native-constraint-type-translations));
+parameter names are documentation. (Verified: fixing the typo and regenerating produces
 byte-identical output.)
 
 ## 5. The pass: parsing patterns at runtime
@@ -521,11 +535,11 @@ then extracts the integer and builds the halved attribute; and because
 `Halve` is a constraint *returning a value*, the result travels back by
 pushing it onto `results`, with `success()` meaning the constraint held.
 `registerNativeConstraints` then ties the `.pdll` declarations to these
-implementations by name. (The article notes this signature was
+implementations by name. (This signature was
 discoverable only from upstream comments and unit tests — consider it
 documented now.)
 
-Second, the pass body, near-identical to Tutorial 3's:
+Second, the pass body, near-identical to Chapter 3's:
 
 ***lib/Transform/Arith/MulToAddPdll.cpp*** (excerpt)
 ```cpp
@@ -557,7 +571,7 @@ The "compiled" pattern is a **string of `pdl` IR** embedded in a C++
 raw-string literal, parsed when the pass is constructed — with the
 *inline* native constraints registered automatically (only the external
 ones needed our manual `registerNativeConstraints`). That's why the
-pass's tablegen declaration (Tutorial 4 machinery, in
+pass's tablegen declaration (Chapter 4 machinery, in
 [`Passes.td`](../lib/Transform/Arith/Passes.td)) lists
 
 ***lib/Transform/Arith/Passes.td*** (excerpt)
@@ -569,7 +583,7 @@ let dependentDialects = [
 ```
 
 — the pass *creates `pdl` IR* (by parsing that string), so the dialects
-must be loaded: Tutorial 10 §2's rule, in an unexpected costume.
+must be loaded: Chapter 10 §2's rule, in an unexpected costume.
 
 ## 6. Under the hood: watching a pattern become bytecode
 
@@ -635,7 +649,7 @@ IR, `pdl_interp` automaton, bytecode — and you've now seen all five.
 ## 7. Build integration and running it
 
 Bazel ([`lib/Transform/Arith/BUILD`](../lib/Transform/Arith/BUILD)) —
-Tutorial 4's `gentbl_cc_library`, with one twist — the generator binary
+Chapter 4's `gentbl_cc_library`, with one twist — the generator binary
 is swapped:
 
 ***lib/Transform/Arith/BUILD*** (excerpt)
@@ -661,7 +675,7 @@ add_mlir_pdll_library(MulToAddPdllIncGen
 ```
 
 Run the pass on [`tests/mul_to_add_pdll.mlir`](../tests/mul_to_add_pdll.mlir)
-(a clone of Tutorial 3's test with the new flag) — verified:
+(a clone of Chapter 3's test with the new flag) — verified:
 
 ```bash
 $TUTORIAL_OPT --mul-to-add-pdll tests/mul_to_add_pdll.mlir
@@ -676,7 +690,7 @@ func.func @just_power_of_two(%arg0: i32) -> i32 {
 }
 ```
 
-Byte-identical behavior to Tutorial 3's `--mul-to-add` — same doubling
+Byte-identical behavior to Chapter 3's `--mul-to-add` — same doubling
 chain, same peel — arrived at through an interpreter instead of compiled
 pattern code.
 
@@ -687,9 +701,9 @@ llvm-lit -sv build-ninja/tests --filter mul_to_add_pdll  # CMake
 
 ## 8. Choosing among three languages
 
-The series' final decision table:
+The book's final decision table:
 
-| | C++ (Tut. 3) | DRR (Tut. 9) | PDLL |
+| | C++ (Ch. 3) | DRR (Ch. 9) | PDLL |
 |---|---|---|---|
 | expressiveness | everything | DAGs, no regions/variadics/multi-result | rich matching; no static arithmetic (yet), no regions (yet) |
 | escape hatch | is the escape hatch | `CPred` strings | typed native constraints/rewrites |
@@ -698,43 +712,28 @@ The series' final decision table:
 | runtime-loadable patterns | no | no | possible by design |
 | status | forever | **maintenance mode** | active development |
 
-Known PDLL gaps as of the article (RFC status noted there): no
+Known PDLL gaps as of this writing (RFC linked in section 4): no
 in-language arithmetic/boolean logic/comparisons (hence `Halve` in C++ —
 RFC exists), no region support, no dialect-conversion (type-converting,
-Tutorial 10-style) patterns. And the official docs still carry the
+Chapter 10-style) patterns. And the official docs still carry the
 banner that designs "are not necessarily final." For new projects the
 practical advice mirrors this repo's history: shapes-of-ops rewrites in
 PDLL or DRR, anything clever in C++, and expect to be fluent in all
 three because you'll *read* all three in the wild.
 
-## Differences from the original article
-
-- Substantively none — uniquely in the series, the repo *is* the
-  article's end state and current upstream PDLL matches it. Cosmetic
-  drift only: newer upstream examples use the `FooOp::create(rewriter,
-  ...)` builder spelling, and generated-code details vary by LLVM
-  version (outputs here are LLVM 20's).
-- The article works around one upstream change worth knowing: newer
-  tablegen requires `DeclareOpInterfaceMethods` to *list* the methods
-  being implemented — the fix is visible in Tutorial 12's
-  `NoisyOps.td` (`["inferResultRanges"]`).
-- Section 3's language tour draws on the official PDLL docs rather than
-  the article; where the two disagree with observed LLVM 20 behavior
-  (e.g. printed default benefits), the outputs shown here are what the
-  tools actually produced.
-
 ## The end of the road
 
-Thirteen tutorials ago, `bazel run mlir-opt -- --help` was an
+Thirteen chapters ago, `bazel run mlir-opt -- --help` was an
 achievement. Since then: lit and FileCheck (2), passes and rewrites (3),
 tablegen (4), a dialect with types and ops (5), traits (6), folding (7),
 verifiers (8), canonicalization and DRR (9), dialect conversion (10), a
 native binary computing polynomial arithmetic (11), an ILP-powered
 global optimizer (12), and patterns as interpreted IR (13). If you want
 more, the thread continues in the real world: [HEIR](https://heir.dev/)
-is the production FHE compiler this series prototyped, `poly` grew into
-upstream MLIR's `polynomial` dialect, and every mechanism in these
-tutorials — including PDLL — is in daily use there.
+is the production FHE compiler this book prototyped, `poly` grew into a
+full `polynomial` dialect (upstreamed to MLIR for a time, now maintained
+in HEIR), and every mechanism in these
+chapters — including PDLL — is in daily use there.
 
 **Exercises**
 
@@ -744,11 +743,11 @@ tutorials — including PDLL — is in daily use there.
    and a `Rewrite`-based variant of `ZeroSelfSub` that works for any
    integer type, not just i32 (hint: you'll need a native rewrite that
    builds a zero attribute from `x`'s type).
-2. The capstone: port Tutorial 9's `DifferenceOfSquares` from DRR to
+2. The capstone: port Chapter 9's `DifferenceOfSquares` from DRR to
    PDLL on paper. You'll need a `HasOneUse` external constraint, the
    repetition trick from 3.6 for `op<poly.mul>(x: Value, x)`, and a
    `#include` of `PolyOps.td`. Compare all three spellings of this one
-   pattern — C++ (Tutorial 9 §3), DRR (§4), yours — side by side.
+   pattern — C++ (Chapter 9 §3), DRR (§4), yours — side by side.
 3. Run `mlir-pdll -x=ast` on `MulToAdd.pdll` and find (a) the imported
    arith ODS constraints at the top, (b) the four `PatternDecl`s,
    (c) how the inline `IsPowerOfTwo` C++ appears vs the bodiless

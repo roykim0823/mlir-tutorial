@@ -29,12 +29,12 @@ $TUTORIAL_OPT $TESTS/affine_loop_unroll.mlir --affine-full-unroll-rewrite
 $TUTORIAL_OPT $TESTS/mul_to_add.mlir --mul-to-add
 
 { step "4. Anatomy of a pass: the preserved tutorial/code/03 binary is equivalent"; } 2>/dev/null
-# The tutorial-exact (hand-written PassWrapper, no tablegen) version of the
+# The chapter-exact (hand-written PassWrapper, no tablegen) version of the
 # same three passes lives in tutorial/code/03 as its own binary. The heads-up
 # claims it registers the same flags and produces identical output on this
-# tutorial's tests -- verify that instead of re-running the same commands:
+# chapter's tests -- verify that instead of re-running the same commands:
 # the --help grep shows the same three flags (minus --mul-to-add-pdll, which
-# belongs to Tutorial 13's code), and each pass's output is diffed against
+# belongs to Chapter 13's code), and each pass's output is diffed against
 # $TUTORIAL_OPT's from the sections above.
 # skipped: bazel build //tutorial/code/03:tutorial-opt-03 (build command; $TUTORIAL_OPT_03 is already built)
 TUTORIAL_OPT_03="${TUTORIAL_OPT_03:-../../bazel-bin/tutorial/code/03/tutorial-opt-03}"

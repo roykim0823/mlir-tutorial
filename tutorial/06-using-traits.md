@@ -1,14 +1,12 @@
-# Tutorial 6: Using Traits
+# Chapter 6: Using Traits
 
-This is a step-by-step companion to the article
-[Using Traits](https://jeremykun.com/2023/09/07/mlir-using-traits/).
-[Tutorial 5](05-defining-a-new-dialect.md) left the `poly` dialect able to
-parse and print — and do absolutely nothing else. This tutorial makes the
+[Chapter 5](05-defining-a-new-dialect.md) left the `poly` dialect able to
+parse and print — and do absolutely nothing else. This chapter makes the
 first payments on that: by declaring **traits** on our ops, a fleet of
 upstream optimization passes — CSE, loop-invariant code motion,
 control-flow sinking — starts working on `poly` code *without us writing a
 line of pass logic*. This is also where those bracketed lists we skipped
-in Tutorial 5's `PolyOps.td` get explained.
+in Chapter 5's `PolyOps.td` get explained.
 
 **What you will learn:**
 
@@ -22,9 +20,9 @@ in Tutorial 5's `PolyOps.td` get explained.
 - That *missing* traits have visible consequences too (why CSE won't touch
   `poly.eval`).
 
-**Prerequisites:** [Tutorial 5](05-defining-a-new-dialect.md). Same build
+**Prerequisites:** [Chapter 5](05-defining-a-new-dialect.md). Same build
 requirements as before (`tutorial-opt`, via the `$TUTORIAL_OPT` variable
-from Tutorial 3).
+from Chapter 3).
 
 ---
 
@@ -42,11 +40,13 @@ entire upstream optimization arsenal.
 MLIR's fix is a declarative contract system with two closely related
 mechanisms:
 
-- An **interface** is a set of function signatures an op implements,
+- An **[interface](https://mlir.llvm.org/docs/Interfaces/)** is a set of
+  function signatures an op implements,
   giving passes a way to query or manipulate it without knowing its
   concrete type (think of `MemoryEffectOpInterface`, which lets any pass
   ask "what do you touch?").
-- A **trait** is, in the article's words, *an interface with no methods*:
+- A **[trait](https://mlir.llvm.org/docs/Traits/)** is — pithily — *an
+  interface with no methods*:
   a marker you "slap on" an operation asserting some property —
   "I have no memory effects", "all my operands and results have one type".
   Many traits also carry a *verification* routine, so the invariant they
@@ -59,9 +59,9 @@ and secondarily to get free verification. Both dimensions show up below.
 
 Mechanically, traits occupy the third template parameter of `Op` — a
 bracketed list of trait names (it defaults to empty, which is why
-Tutorial 5 could ignore it). Each name in the list is one contract in
+Chapter 5 could ignore it). Each name in the list is one contract in
 section 1's sense: a property the op asserts to every pass, often with a
-verification routine attached. Here is Tutorial 5's binop base again,
+verification routine attached. Here is Chapter 5's binop base again,
 this time reading the bracket:
 
 ***lib/Dialect/Poly/PolyOps.td*** (excerpt)
@@ -91,7 +91,8 @@ Taking the three traits in turn:
   division can introduce a divide-by-zero that the original program
   guarded against.
 
-The distinction is real and bites: the article's author first applied only
+The distinction is real and bites: this codebase's author first applied
+only
 `AlwaysSpeculatable` and was baffled that `--loop-invariant-code-motion`
 did nothing — reading the pass source revealed LICM requires *both*
 `isSpeculatable` *and* `isMemoryEffectFree`. Hoisting an op out of a loop
@@ -112,7 +113,9 @@ def PolyOrContainer : TypeOrValueSemanticsContainer<Polynomial, "poly-or-contain
 ```
 
 which relaxes "a polynomial" to "a polynomial, or a tensor/vector of
-them". From `tests/poly_syntax.mlir` (Tutorial 5's round-trip test):
+them". (Upstream once called this helper `TypeOrContainer`; it was
+renamed to `TypeOrValueSemanticsContainer` with the same meaning.) From
+`tests/poly_syntax.mlir` (Chapter 5's round-trip test):
 
 ***tests/poly_syntax.mlir*** (excerpt)
 ```mlir
@@ -134,25 +137,35 @@ Verifies that both operands and the result all have exactly the same type
 
 - With all types provably equal, the assembly format only needs to spell
   one of them — this is why the binop syntax is the terse
-  `poly.add %a, %b : !poly.poly<10>` rather than Tutorial 5's article-era
-  `(type, type) -> type`.
+  `poly.add %a, %b : !poly.poly<10>` rather than the earlier pre-trait
+  `(type, type) -> type` (Chapter 5 §5).
 - The trait implies **type inference** (you'll see
   `InferTypeOpInterface::Trait` in the generated code below): given
   operand types, MLIR can construct the op without being told the result
   type.
 
+> **Note:** an earlier version of these ops used the looser
+> `SameOperandsAndResultElementType` (same *element* type only —
+> containers could mix with scalars), which admitted a mixed
+> scalar-tensor add like
+> `poly.add %tensor, %scalar : (tensor<2x!poly.poly<10>>, !poly.poly<10>) -> ...`.
+> With `SameOperandsAndResultType` that is now **rejected**: feeding it
+> in generic form produces
+> `'poly.add' op requires the same type for all operands and results`
+> (verified). Containers still work; they just must match on both sides.
+
 `poly.eval` uses the parameterized cousin visible in `PolyOps.td` —
 `AllTypesMatch<["point", "output"]>` — same idea, scoped to a named subset
 of operands/results. (Its other trait, `Has32BitArguments`, is a
 *custom* trait defined in this repo — `PolyTraits.h` — whose story is
-verification, Tutorial 8's subject. You already met its error message in
-Tutorial 5's exercise 3.)
+verification, Chapter 8's subject. You already met its error message in
+Chapter 5's exercise 3.)
 
 ## 3. Step: watch the upstream passes work
 
 Time to collect. Three test files, three upstream passes, zero lines of
 `poly`-specific pass code. (All passes here are registered by
-`registerAllPasses()` in `tutorial-opt` — Tutorial 3 §3.)
+`registerAllPasses()` in `tutorial-opt` — Chapter 3 §3.)
 
 ### Common subexpression elimination
 
@@ -181,8 +194,13 @@ deduplicating it would halve the log.
 
 ### Loop-invariant code motion
 
-[`tests/code_motion.mlir`](../tests/code_motion.mlir) multiplies two
-loop-constant polynomials *inside* a loop:
+The upstream
+[general transformation passes list](https://mlir.llvm.org/docs/Passes/#general-transformation-passes)
+includes
+[loop invariant code motion](https://mlir.llvm.org/docs/Passes/#-loop-invariant-code-motion),
+which checks loop bodies for operations that don't need to be in the loop
+and moves them out. [`tests/code_motion.mlir`](../tests/code_motion.mlir)
+multiplies two loop-constant polynomials *inside* a loop:
 
 ***tests/code_motion.mlir*** (excerpt)
 ```mlir
@@ -262,7 +280,7 @@ list.
 
 What does the bracket in tablegen become? Every trait is a C++ *template
 mixin* threaded into the op's base class — the same CRTP dance as
-Tutorials 3–4, at industrial scale. To see it, run Tutorial 5's
+Chapters 3–4, at industrial scale. To see it, run Chapter 5's
 `--gen-op-decls` command again and look at `AddOp`'s actual base class
 (verified, one line, wrapped here):
 
@@ -297,41 +315,25 @@ You can see the expansions, declaration by declaration:
   promised.
 - Even "trivia" you never declared is trait-encoded: `ZeroRegions`,
   `OneResult`, `NOperands<2>` come from the `arguments`/`results` you
-  wrote in Tutorial 5.
+  wrote in Chapter 5.
 
 Mechanically, a trait is a class template with optional hooks; the most
 common is `verifyTrait`, which runs as part of op verification. That hook
 is how `SameOperandsAndResultType` rejects mismatched types — and it's the
-hook our own `Has32BitArguments` implements, as Tutorial 8 will show in
+hook our own `Has32BitArguments` implements, as Chapter 8 will show in
 detail.
 
-A practical note from the article, still true: there is no single
-documented list of all upstream traits. The
-[Traits documentation](https://mlir.llvm.org/docs/Traits/) covers many,
+A practical note, still true: there is no single
+documented list of all upstream traits. The Traits documentation's
+[operation traits list](https://mlir.llvm.org/docs/Traits/#operation-traits-list)
+covers many,
 but some (e.g. `ConstantLike`, `Involution`, `Idempotent`) you discover
 only by reading `OpBase.td` and the pass sources. A few worth knowing
 exist, even though `poly` doesn't use them: `Commutative` (operand
 reordering; canonicalization uses it to move constants rightward — the
-fact `PowerOfTwoExpand` relied on in Tutorial 3!), `Involution`
+fact `PowerOfTwoExpand` relied on in Chapter 3!), `Involution`
 (`f(f(x)) = x`, would auto-cancel a hypothetical double `poly.neg`), and
 `Idempotent` (`f(f(x)) = f(x)`).
-
-## Differences from the original article
-
-- **The type-equality trait got stricter.** The article applies
-  `SameOperandsAndResultElementType` (same *element* type, containers may
-  mix with scalars); the repo now uses `SameOperandsAndResultType`. The
-  article's mixed scalar-tensor example —
-  `poly.add %tensor, %scalar : (tensor<2x!poly.poly<10>>, !poly.poly<10>) -> ...`
-  — is therefore now **rejected**: feeding it in generic form produces
-  `'poly.add' op requires the same type for all operands and results`
-  (verified). Containers still work; they just must match on both sides.
-- The article defers SCCP ("requires a bit of extra work... next time");
-  the repo already contains `tests/sccp.mlir` and everything it needs —
-  that extra work is folding, i.e. exactly the next tutorial.
-- `PolyOrContainer` is spelled with `TypeOrValueSemanticsContainer` in the
-  current repo (the article used `TypeOrContainer`) — an upstream renaming
-  with the same meaning.
 
 ## Where to go next
 
@@ -340,8 +342,8 @@ Traits let *existing* ops be moved, merged, and deleted — but nothing yet
 in the repo waiting: sparse conditional constant propagation can replace
 `poly.mul` of known constants with a `poly.constant` of the product — once
 the ops know how to **fold**. That, plus the `hasConstantMaterializer`
-flag we skipped in Tutorial 5's dialect shell, is
-[Tutorial 7: Folders and Constant Propagation](07-folders-and-constant-propagation.md).
+flag we skipped in Chapter 5's dialect shell, is
+[Chapter 7: Folders and Constant Propagation](07-folders-and-constant-propagation.md).
 
 **Exercises**
 
@@ -352,9 +354,10 @@ flag we skipped in Tutorial 5's dialect shell, is
 2. Make LICM refuse: change `tests/code_motion.mlir`'s `poly.mul` to
    depend on `%sum_iter` and confirm the mul stays in the loop — trait or
    not, invariance is about operands.
-3. Verify the stricter trait yourself: run this tutorial's mixed
-   scalar/tensor `poly.add` (use the generic `"poly.add"(...)` syntax from
-   Tutorial 1 §3, since the pretty syntax can't even express it) and read
+3. Verify the stricter trait yourself: run this chapter's mixed
+   scalar/tensor `poly.add` (§2's note; use the generic `"poly.add"(...)`
+   syntax from
+   Chapter 1 §3, since the pretty syntax can't even express it) and read
    the verifier error.
 4. Run `-cse` and `--loop-invariant-code-motion` *together* on
    `tests/cse.mlir` and `tests/code_motion.mlir` with two `--pass-pipeline`

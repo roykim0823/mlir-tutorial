@@ -1,17 +1,16 @@
-# Tutorial 10: Dialect Conversion
+# Chapter 10: Dialect Conversion
 
-This is a step-by-step companion to the article
-[Dialect Conversion](https://jeremykun.com/2023/10/23/mlir-dialect-conversion/).
-Nine tutorials in, `poly` is a complete high-level IR — and completely
-unable to run. This tutorial starts the descent: **lowering** `poly` into
-upstream dialects (`arith`, `tensor`, `scf`), so that Tutorial 11 can
+Nine chapters in, `poly` is a complete high-level IR — and completely
+unable to run. This chapter starts the descent: **lowering** `poly` into
+upstream dialects (`arith`, `tensor`, `scf`), so that
+[Chapter 11](11-lowering-through-llvm.md) can
 carry it the rest of the way to an executable. On the way we meet the one
-piece of pass machinery Tutorial 3 couldn't teach, because it only
+piece of pass machinery Chapter 3 couldn't teach, because it only
 matters when *types* change: the **dialect conversion framework**.
 
 Everything lives in
 [`lib/Conversion/PolyToStandard/`](../lib/Conversion/PolyToStandard/) —
-the `Conversion/` directory promised by Tutorial 3 §2's layout tour —
+the `Conversion/` directory promised by Chapter 3 §2's layout tour —
 and runs as `--poly-to-standard`.
 
 **What you will learn:**
@@ -26,23 +25,23 @@ and runs as `--poly-to-standard`.
 - How to read the framework's signature error — "failed to legalize
   unresolved materialization" — with a live reproduction.
 
-**Prerequisites:** [Tutorial 9](09-canonicalizers-and-drr.md) (all of
-`poly`), [Tutorial 3](03-writing-our-first-pass.md) (rewrite patterns),
-and Tutorial 2 §8's pipeline vocabulary. Same build setup
+**Prerequisites:** [Chapter 9](09-canonicalizers-and-drr.md) (all of
+`poly`), [Chapter 3](03-writing-our-first-pass.md) (rewrite patterns),
+and Chapter 2 §8's pipeline vocabulary. Same build setup
 (`$TUTORIAL_OPT`).
 
 ---
 
 ## 1. Concepts: what makes lowering hard
 
-Here is the plan, and it sounds like a Tutorial 3 exercise: rewrite
-`poly.add` into `arith.addi`, `poly.mul` into loops, and so on. As the
-article puts it: *if not for types, dialect conversion would be
+Here is the plan, and it sounds like a Chapter 3 exercise: rewrite
+`poly.add` into `arith.addi`, `poly.mul` into loops, and so on. As this
+codebase's author puts it: *if not for types, dialect conversion would be
 essentially the same as a normal pass*.
 
 But types ruin everything. Our `TypeConverter` will say a
 `!poly.poly<10>` becomes a `tensor<10xi32>` (ten 32-bit coefficients —
-Tutorial 5 §1's representation, made literal). Now rewrite one op:
+Chapter 5 §1's representation, made literal). Now rewrite one op:
 
 ```mlir
 %2 = poly.add %0, %1 : !poly.poly<10>      // becomes...
@@ -53,22 +52,24 @@ The moment you do, the IR is inconsistent: `%0` and `%1` are still
 `!poly.poly<10>` (their defining ops aren't converted yet), so the new
 `arith.addi` is ill-typed; and every not-yet-converted *user* of `%2`
 still expects a `!poly.poly<10>`. Any conversion order you pick leaves a
-frontier of type mismatches — and Tutorial 8 taught us mismatches don't
-survive a verifier. A plain greedy rewrite (Tutorial 3) has no answer;
+frontier of type mismatches — and Chapter 8 taught us mismatches don't
+survive a verifier. A plain greedy rewrite (Chapter 3) has no answer;
 you'd need every pattern to defensively cast, and patterns would have to
 fire in dependency order.
 
-The **dialect conversion framework** exists to manage that frontier. The
-idea:
+The **dialect conversion framework**
+([official docs](https://mlir.llvm.org/docs/DialectConversion/)) exists to
+manage that frontier. The idea:
 
 - You declare which types change and how (**TypeConverter**).
 - You write patterns that see their operands *as if already converted*
   (**OpConversionPattern** — the framework rewrites the graph in a sorted
   order and hands each pattern the in-progress converted values).
 - Type mismatches on the frontier are patched with temporary
-  `builtin.unrealized_conversion_cast` ops (you met these in Tutorial 2
-  §6's pipeline — now you know who makes them) that the framework
-  removes as conversion completes.
+  [`builtin.unrealized_conversion_cast`](https://mlir.llvm.org/docs/Dialects/Builtin/#builtinunrealized_conversion_cast-unrealizedconversioncastop)
+  ops — essentially a forced type coercion, the internal stand-in for a
+  type conflict (you met these in Chapter 2 §6's pipeline — now you know
+  who makes them) — that the framework removes as conversion completes.
 - You declare what "done" means (**ConversionTarget**), and the framework
   checks it — any op still illegal at the end is an error.
 
@@ -80,9 +81,9 @@ no `poly` ops remain" — and the framework enforces it.
 
 The pass is declared in
 [`PolyToStandard.td`](../lib/Conversion/PolyToStandard/PolyToStandard.td)
-(Tutorial 4 machinery — note the four `dependentDialects`: the pass
+(Chapter 4 machinery — note the four `dependentDialects`: the pass
 *creates* `arith`, `tensor`, and `scf` ops, so those dialects must be
-loaded — Tutorial 4 §2's rule, now with real stakes). The interesting
+loaded — Chapter 4 §2's rule, now with real stakes). The interesting
 code is in
 [`PolyToStandard.cpp`](../lib/Conversion/PolyToStandard/PolyToStandard.cpp),
 starting with the type rule. A `TypeConverter` is the first of section
@@ -109,9 +110,9 @@ class PolyToStandardTypeConverter : public TypeConverter {
 Two `addConversion` calls, tried in reverse order of registration: the
 `PolynomialType` one maps `!poly.poly<N>` → `tensor<Nxi32>` (the degree
 bound *from the type parameter* becomes the static tensor length — this
-is where Tutorial 5's decision to put N in the type pays off); the
+is where Chapter 5's decision to put N in the type pays off); the
 identity conversion says every other type is fine as-is. Note the
-signless `i32` — Tutorial 8 §2's distinction, consciously chosen.
+signless `i32` — Chapter 8 §2's distinction, consciously chosen.
 
 The repo's comment at this spot is worth reading in the source: no
 custom *materializations* are registered. Materialization hooks tell the
@@ -119,11 +120,13 @@ framework how to build real ops bridging old→new types when a mismatch
 must persist; because this lowering converts everything in one pass, the
 temporary `unrealized_conversion_cast`s all cancel out by the end, and no
 custom hook is needed. (Section 6 shows what happens when they *don't*
-cancel.)
+cancel. A version-drift note if you go exploring these hooks: their
+upstream API has shifted over the years — argument materializations were
+merged into source materializations in later LLVM releases.)
 
 ## 3. Conversion patterns
 
-A conversion pattern is Tutorial 3's rewrite pattern re-based onto the
+A conversion pattern is Chapter 3's rewrite pattern re-based onto the
 framework: still one class per op, still a `matchAndRewrite` whose job
 is to build replacement ops and replace the root — but it subclasses
 `OpConversionPattern` instead of `OpRewritePattern`, and that changes
@@ -149,7 +152,7 @@ Both differences sit in that signature, and they carry the whole
 framework:
 
 - **The `OpAdaptor` parameter** (an alias for `AddOp::Adaptor`, generated
-  code you met in Tutorial 7 as `FoldAdaptor`'s sibling). Its accessors —
+  code you met in Chapter 7 as `FoldAdaptor`'s sibling). Its accessors —
   `adaptor.getLhs()` — return the *already-type-converted* operands: by
   the time this runs, they are `tensor<10xi32>` values, no matter what
   the original IR looked like. The `op` parameter still has the original
@@ -158,11 +161,11 @@ framework:
   see the inconsistent frontier.
 - **`ConversionPatternRewriter`** — a `PatternRewriter` with extra
   conversion-aware methods. Rule of thumb: inside a conversion pattern,
-  do *everything* through it, even more strictly than Tutorial 3's
+  do *everything* through it, even more strictly than Chapter 3's
   "technically not allowed" comment warned.
 
 Why does `arith.addi` accept tensors at all? Because it's
-`ElementwiseMappable` — Tutorial 6's trait, on the *other* side of the
+`ElementwiseMappable` — Chapter 6's trait, on the *other* side of the
 trade. Polynomial addition is coefficient-wise addition, so the whole
 lowering is one op. `ConvertSub` is identical with `subi`;
 `ConvertToTensor` is even better — `to_tensor` becomes *nothing*
@@ -173,14 +176,16 @@ which case it zero-pads with `tensor.pad` (visible in section 5's test).
 
 ### Multiplication: creating a loop nest
 
-`poly.mul` is a cyclic convolution (Tutorial 7 §3 computed it at compile
+`poly.mul` is a cyclic convolution (Chapter 7 §3 computed it at compile
 time; now we emit code to do it at *runtime*). The pattern —
-`ConvertMul` in the source — builds Tutorial 7's double loop as IR. It's
+`ConvertMul` in the source — builds Chapter 7's double loop as IR. It's
 long but made of three readable pieces:
 
 1. an all-zeros result tensor: `arith.constant dense<0> : tensor<Nxi32>`;
-2. loop scaffolding: `scf.for` ops built with `b.create<scf::ForOp>`,
-   with the accumulating tensor threaded through `iter_args` (Tutorial
+2. loop scaffolding:
+   [`scf.for`](https://mlir.llvm.org/docs/Dialects/SCFDialect/#scffor-scfforop)
+   ops built with `b.create<scf::ForOp>`,
+   with the accumulating tensor threaded through `iter_args` (Chapter
    1 §4's idiom, now built programmatically — the lambda you pass
    `create<ForOp>` receives the loop induction variable and loop state
    and fills the body);
@@ -192,7 +197,7 @@ One style note you'll use forever: `ImplicitLocOpBuilder b(op.getLoc(),
 rewriter);` wraps the rewriter so you stop passing the location to every
 `create` — builders with 10+ creates get much cleaner.
 
-Run it (all output in this tutorial is real, from a degree-4 example to
+Run it (all output in this chapter is real, from a degree-4 example to
 keep it readable):
 
 ```mlir
@@ -230,12 +235,15 @@ func.func @lower_mul(%arg0: tensor<4xi32>, %arg1: tensor<4xi32>) -> tensor<4xi32
 }
 ```
 
-Read the inner body against Tutorial 7's fold —
+Read the inner body against Chapter 7's fold —
 `result[(i + j) % degree] += lhs[i] * rhs[j]` — it's the same algorithm,
 emitted instead of executed. (A "functional tensors" note: `tensor.insert`
 doesn't mutate; it yields a *new* tensor value, which is why the
 accumulator threads through `iter_args`. Turning this into actual
-in-place memory is Tutorial 11's bufferization step.)
+in-place memory is Chapter 11's
+[bufferization](https://mlir.llvm.org/docs/Bufferization/) step — one of
+the harder lowering pipelines in upstream MLIR, and part of why the
+dialect conversion framework carries the complexity it does.)
 
 ### Evaluation: Horner's method
 
@@ -303,13 +311,13 @@ if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
 
 `addIllegalDialect<PolyDialect>()` is the contract: when the dust
 settles, zero `poly` ops. The framework drives patterns *toward* that
-goal and fails the pass if it can't get there — unlike Tutorial 3's
+goal and fails the pass if it can't get there — unlike Chapter 3's
 greedy driver, which happily stops at any fixed point.
 
-Then comes the part the article rightly flags as everyone's first
-stumble: **ops you don't own carry your types**. Our test functions have
+Then comes everyone's first stumble: **ops you don't own carry your
+types**. Our test functions have
 signatures like `(%arg0: !poly.poly<10>)` — the type hides inside
-`func.func`'s *attributes* (remember Tutorial 1 §3's generic form:
+`func.func`'s *attributes* (remember Chapter 1 §3's generic form:
 `function_type` is just data). No `poly` op is involved, so our patterns
 never fire, but the contract isn't met until those signatures change
 too. Upstream provides drop-in helpers, one per structural-op family:
@@ -337,7 +345,7 @@ the classic source of section 6's error.
 Finally, `applyPartialConversion` vs `applyFullConversion`: *full*
 requires every op in the module be legal afterward; *partial* only
 requires that no *illegal* op remain, leaving unknown ops alone. The
-article's advice, adopted by the repo: partial is a strict
+advice this repo adopts: partial is a strict
 generalization, use it (and it produces far better errors).
 
 ## 5. Step: run the conversion
@@ -411,24 +419,10 @@ error shows you the surviving cast *and its user*. When you see this in
 your own work, the question to ask is: which pattern produced a value of
 the wrong type, or which structural op did I forget to populate patterns
 for? (Also try `--debug` for the framework's step-by-step legalization
-log — Tutorial 3 exercise 3's flag, at its most useful here. And note the
+log — Chapter 3 exercise 3's flag, at its most useful here. And note the
 pattern *should* have refused to match a complex eval with
 `return failure()` — as written it happily miscompiles-then-fails; making
 it decline politely is exercise 3.)
-
-## Differences from the original article
-
-- The article experiments with custom `addSourceMaterialization` /
-  `addTargetMaterialization` hooks and then removes them; the repo keeps
-  none and instead documents *why* in a comment worth reading
-  (single-pass conversions don't need them). The upstream API for these
-  hooks has also shifted since 2023 (argument materializations were
-  merged into source materializations in later LLVM).
-- Output details differ cosmetically from the article's listings
-  (`arith.remui` spelling, `tensor.pad` region syntax) — the outputs
-  shown here are from the current toolchain.
-- The article's `test_lower_many` end-to-end example exists in spirit
-  across the repo's per-op test functions.
 
 ## Where to go next
 
@@ -436,7 +430,7 @@ We're one flight down the staircase: `poly` programs are now `tensor` +
 `scf` + `arith` programs. But those still aren't executable — tensors
 must become memory (bufferization), loops must become branches, and
 everything must reach the `llvm` dialect and beyond. That's
-[Tutorial 11: Lowering through LLVM](11-lowering-through-llvm.md) —
+[Chapter 11: Lowering through LLVM](11-lowering-through-llvm.md) —
 where the `--poly-to-llvm` mega-pipeline in `tutorial-opt.cpp` (the one
 piece of that file we've never discussed) finally runs, and a real
 `main.c` calls a compiled polynomial evaluator.
@@ -459,8 +453,8 @@ piece of that file we've never discussed) finally runs, and a real
 4. The mul lowering is O(N²) with a `remui` in the hot loop. Sketch (IR
    on paper, not C++) a version that splits the inner loop into the
    no-wraparound prefix and the wraparound suffix, eliminating `remui`.
-   Which Tutorial 3 pass would you use to check your hand-derived IR
-   computes the same thing? (Hint: Tutorial 11 gives you a better tool —
+   Which Chapter 3 pass would you use to check your hand-derived IR
+   computes the same thing? (Hint: Chapter 11 gives you a better tool —
    running it.)
 5. Section 4 said `partial` beats `full` conversion. Change one line in
    your head: with `applyFullConversion`, what *additional* ops in

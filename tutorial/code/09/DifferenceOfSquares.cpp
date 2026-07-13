@@ -8,8 +8,8 @@ namespace mlir {
 namespace tutorial {
 namespace poly {
 
-// The C++ version of the DifferenceOfSquares pattern, as Tutorial 9 section 3
-// presents it (the article's original; the repo's current version is the DRR
+// The C++ version of the DifferenceOfSquares pattern, as Chapter 9 section 3
+// presents it (the original form; the repo's current version is the DRR
 // pattern in lib/Dialect/Poly/PolyPatterns.td).
 struct DifferenceOfSquares : public OpRewritePattern<SubOp> {
   DifferenceOfSquares(mlir::MLIRContext *context)
@@ -42,8 +42,8 @@ struct DifferenceOfSquares : public OpRewritePattern<SubOp> {
     SubOp newSub = rewriter.create<SubOp>(op.getLoc(), x, y);
     MulOp newMul = rewriter.create<MulOp>(op.getLoc(), newAdd, newSub);
 
-    // The article wrote `replaceOp(op, {newMul})`; the braced form is
-    // ambiguous (ValueRange vs. Operation*) in current MLIR.
+    // The original version wrote `replaceOp(op, {newMul})`; the braced form
+    // is ambiguous (ValueRange vs. Operation*) in current MLIR.
     rewriter.replaceOp(op, newMul);
     return success();
   }

@@ -1,4 +1,4 @@
-// Preserved Tutorial 3 code, pre-tablegen (tutorial 3 section 7); the
+// Preserved Chapter 3 code, pre-tablegen (chapter 3 section 7); the
 // current version is lib/Transform/Affine. See README.md in this directory.
 #ifndef TUTORIAL_CODE_03_AFFINEFULLUNROLLPATTERNREWRITE_H_
 #define TUTORIAL_CODE_03_AFFINEFULLUNROLLPATTERNREWRITE_H_

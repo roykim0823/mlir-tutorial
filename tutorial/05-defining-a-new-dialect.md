@@ -1,19 +1,16 @@
-# Tutorial 5: Defining a New Dialect
+# Chapter 5: Defining a New Dialect
 
-This is a step-by-step companion to the article
-[Defining a New Dialect](https://jeremykun.com/2023/08/21/mlir-defining-a-new-dialect/).
-So far we have consumed dialects other people defined. Now the training
-wheels come off: we define **`poly`**, a dialect for polynomial arithmetic,
-with its own type (`!poly.poly<10>`) and operations (`poly.add`,
-`poly.mul`, `poly.eval`, ...). This dialect is the codebase's protagonist —
-every remaining tutorial builds on it.
+So far we have consumed dialects other people defined. In this chapter the
+training wheels come off: we define **`poly`**, a dialect for polynomial
+arithmetic, with its own type (`!poly.poly<10>`) and operations
+(`poly.add`, `poly.mul`, `poly.eval`, ...). This dialect is the codebase's
+protagonist — every remaining chapter builds on it.
 
 One reading note up front: the repo's `poly` files have accumulated
-machinery from articles 6–9 (traits, folders, verifiers, canonicalizers).
-This tutorial walks the *current* files but clearly marks each
+machinery from Chapters 6–9 (traits, folders, verifiers, canonicalizers).
+This chapter walks the *current* files but clearly marks each
 forward-reference — you'll know exactly which `let` lines to ignore until
-their tutorial comes (see also
-[Differences from the original article](#differences-from-the-original-article)).
+their chapter comes.
 
 **What you will learn:**
 
@@ -25,33 +22,33 @@ their tutorial comes (see also
   `!poly.poly<10>`), and what type *uniquing* means.
 - How the generated classes look and how the dialect registers itself into
   `tutorial-opt`.
-- How to test syntax round-tripping — including a real bug this tutorial
+- How to test syntax round-tripping — including a real bug this chapter
   found in the repo's own test.
 
-**Prerequisites:** [Tutorial 4](04-using-tablegen-for-passes.md) — dialect
+**Prerequisites:** [Chapter 4](04-using-tablegen-for-passes.md) — dialect
 definition is tablegen-heavy, and we lean on the "read the generated code"
-habit throughout. Build requirements are the same as Tutorial 3
+habit throughout. Build requirements are the same as Chapter 3
 (`tutorial-opt`).
 
 ---
 
 ## 1. Concepts: what's in a dialect, and why polynomials
 
-Tutorial 1 described a dialect as a self-contained set of operations and
+Chapter 1 described a dialect as a self-contained set of operations and
 types with defined semantics. Defining one means providing:
 
 1. a **dialect shell** — the namespace, its registration, and bookkeeping;
 2. **types** — here, "a polynomial" (`!poly.poly<N>`);
 3. **ops** — here, arithmetic on polynomials;
 4. eventually, the *behaviors* hanging off those ops (verification,
-   folding, lowering) — that's tutorials 6–11.
+   folding, lowering) — that's Chapters 6–11.
 
 In MLIR's informal taxonomy of dialects — some model *computation*
 (`arith`, `math`), some *structure* (`func`, `scf`), some *hardware*
 (`llvm`, `spirv`) — `poly` is squarely a computation dialect: it exists so
 that a program can say "multiply these polynomials" without saying how,
 keeping the mathematical intent visible for optimization, exactly the
-trick Tutorial 1 §1 promised.
+trick Chapter 1 §1 promised.
 
 ### What `poly` represents, concretely
 
@@ -73,7 +70,7 @@ Arithmetic is what you learned in school, on those lists:
 - **Multiplication** multiplies every term by every term; products of xⁱ
   and xʲ land at x^(i+j):
   `[1, 1] · [1, 1] = [1, 2, 1]`, i.e. (1 + x)² = 1 + 2x + x².
-  (Tutorial 7 works a bigger example digit by digit when the compiler
+  (Chapter 7 works a bigger example digit by digit when the compiler
   starts doing this arithmetic itself.)
 
 Two wraparound rules make the type finite, and both are visible in the
@@ -98,21 +95,21 @@ p = 1 + 2x + 3x², square it, evaluate at x = 7:
 ```
 
 Why give this its own dialect instead of writing loops over `tensor`s of
-coefficients? The same answer as Tutorial 1's `affine` story: at this
+coefficients? The same answer as Chapter 1's `affine` story: at this
 level, the compiler can use *polynomial* facts — fold a `poly.mul` of
-constants by actually multiplying polynomials (Tutorial 7), simplify with
-algebraic identities (Tutorial 9) — none of which are visible once the
+constants by actually multiplying polynomials (Chapter 7), simplify with
+algebraic identities (Chapter 9) — none of which are visible once the
 program is a soup of loops and loads. Only when the polynomial-level
-optimizations are done will we lower to that soup (Tutorials 10–11).
+optimizations are done will we lower to that soup (Chapters 10–11).
 Polynomial arithmetic is also the computational heart of FHE, this
-series' end goal: ciphertexts in lattice-based cryptography *are* vectors
-of polynomials in exactly this kind of ring. (The article is careful to
-prioritize "get *some* dialect defined" over optimal design — things like
-whether the degree belongs in the type are deliberately not agonized
+book's end goal: ciphertexts in lattice-based cryptography *are* vectors
+of polynomials in exactly this kind of ring. (The design deliberately
+prioritizes "get *some* dialect defined" over optimal design — things
+like whether the degree belongs in the type are deliberately not agonized
 over.)
 
 Everything lives in [`lib/Dialect/Poly/`](../lib/Dialect/Poly/), following
-Tutorial 3 §2's layout conventions: three tablegen files (dialect, types,
+Chapter 3 §2's layout conventions: three tablegen files (dialect, types,
 ops), matching `.h`/`.cpp` pairs, and build files.
 
 ## 2. The dialect shell
@@ -145,16 +142,16 @@ def Poly_Dialect : Dialect {
 - `name` — the namespace prefix in IR text: ops print as `poly.add`, types
   as `!poly.poly<10>`.
 - `cppNamespace` — where the generated C++ lands. Unlike the pass
-  generator (Tutorial 4), which emitted namespace-less code for you to
+  generator (Chapter 4), which emitted namespace-less code for you to
   wrap, the dialect generators emit these namespaces themselves.
 - `useDefaultTypePrinterParser` — asks tablegen to generate the dialect's
   type parser/printer from each type's `assemblyFormat` (section 4).
   Without it, you write `parseType`/`printType` by hand — and forgetting it
   entirely is a classic silent failure where your type won't parse.
-- `hasConstantMaterializer` — a **forward reference to Tutorial 7**
+- `hasConstantMaterializer` — a **forward reference to Chapter 7**
   (folding); ignore it today.
 
-Run the generator yourself (Tutorial 4 §3's habit — `-I` paths let the
+Run the generator yourself (Chapter 4 §3's habit — `-I` paths let the
 `.td` includes resolve; add `-I lib/Dialect/Poly` since the files include
 each other by bare name):
 
@@ -200,13 +197,13 @@ that hook is where types and ops get attached. The matching
 plumbing. The consuming header,
 [`PolyDialect.h`](../lib/Dialect/Poly/PolyDialect.h), is three lines: an
 include the generated code needs, plus the `.h.inc` — the same
-`.inc`-consumption pattern as Tutorial 4, minus the `#define` gates
+`.inc`-consumption pattern as Chapter 4, minus the `#define` gates
 (dialect decls have no sections to select).
 
 ## 3. Registering the dialect
 
 One line in [`tools/tutorial-opt.cpp`](../tools/tutorial-opt.cpp), next to
-the pass registrations from Tutorial 3 §3:
+the pass registrations from Chapter 3 §3:
 
 ***tools/tutorial-opt.cpp*** (excerpt)
 ```cpp
@@ -233,9 +230,9 @@ allowUnregisteredDialects() on the MLIRContext ...
 (MLIR can optionally round-trip unknown-dialect IR as opaque text — that's
 the `allow-unregistered-dialect` escape hatch it mentions — but nothing can
 be *done* with such ops.) Second, right after `poly` sits `polynomial`:
-this tutorial series' dialect was later contributed to upstream MLIR by the
-article's author in expanded form. You are studying the prototype of a real
-dialect.
+this book's dialect was later contributed to upstream MLIR by this
+codebase's author in expanded form. You are studying the prototype of a
+real dialect.
 
 ## 4. The type: `!poly.poly<10>`
 
@@ -270,10 +267,10 @@ def Polynomial : Poly_Type<"Polynomial", "poly"> {
 }
 ```
 
-- The `class`/`def` split is Tutorial 4's lesson applied as a convention:
+- The `class`/`def` split is Chapter 4's lesson applied as a convention:
   `Poly_Type` is a reusable template tying every type in this dialect to
   `Poly_Dialect`; `def Polynomial` instantiates the one concrete type.
-  (The article warns from experience: accidentally writing `def` where you
+  (A warning from experience: accidentally writing `def` where you
   mean `class`, or vice versa, produces spectacularly unhelpful errors.)
 - `TypeDef<Poly_Dialect, "Polynomial">` generates a class named
   `PolynomialType` (C++ name = record name + `Type`).
@@ -282,11 +279,12 @@ def Polynomial : Poly_Type<"Polynomial", "poly"> {
   (`poly.add`) and attributes (`#...`) — you have been reading builtin
   types (`i32`, `memref<4xi32>`) without prefixes only because builtins
   get that privilege.
-- `parameters` — the compile-time data the type carries. Here one `int`
+- [`parameters`](https://mlir.llvm.org/docs/DefiningDialects/AttributesAndTypes/#parameters)
+  — the compile-time data the type carries. Here one `int`
   named `degreeBound`: the `10` in `!poly.poly<10>`, section 1's
   power-wraparound bound (x¹⁰ ≡ 1, so 10 coefficient slots represent
-  every ring element). Nothing in *this* tutorial enforces those
-  semantics — a type is just data; they become real when Tutorial 7's
+  every ring element). Nothing in *this* chapter enforces those
+  semantics — a type is just data; they become real when Chapter 7's
   folders compute with it. Encoding the bound in the *type* means degree
   compatibility is checked statically, the same way `tensor<3xi32>` vs
   `tensor<4xi32>` mismatches are.
@@ -315,8 +313,10 @@ Note there is no public constructor — only a static
 `!poly.poly<10>` exists exactly once, `get` returns the canonical instance,
 and comparing types is pointer comparison. The generated
 `PolynomialTypeStorage` (in the `detail` namespace) is the hash-consed
-storage making that work — free for simple parameters like `int`; wilder
-parameter types eventually require hand-written storage.
+[storage](https://mlir.llvm.org/docs/DefiningDialects/AttributesAndTypes/#storage-classes)
+making that work — free for simple parameters like `int` that have trivial
+construction/destruction semantics; wilder parameter types (an array
+needing allocation, say) eventually require hand-written storage.
 
 ## 5. The ops
 
@@ -331,12 +331,12 @@ the forward references annotated:
 ***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 class Poly_BinOp<string mnemonic> : Op<Poly_Dialect, mnemonic,
-    [Pure, ElementwiseMappable, SameOperandsAndResultType]> {  // Tutorial 6
+    [Pure, ElementwiseMappable, SameOperandsAndResultType]> {  // Chapter 6
   let arguments = (ins PolyOrContainer:$lhs, PolyOrContainer:$rhs);
   let results = (outs PolyOrContainer:$output);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` qualified(type($output))";
-  let hasFolder = 1;         // Tutorial 7
-  let hasCanonicalizer = 1;  // Tutorial 9
+  let hasFolder = 1;         // Chapter 7
+  let hasCanonicalizer = 1;  // Chapter 9
 }
 
 def Poly_AddOp : Poly_BinOp<"add"> {
@@ -346,7 +346,7 @@ def Poly_SubOp : Poly_BinOp<"sub"> { ... }
 def Poly_MulOp : Poly_BinOp<"mul"> { ... }
 ```
 
-At the article's stage this base was simpler — no trait list, no folder,
+In its first incarnation this base was simpler — no trait list, no folder,
 and plain `Polynomial:$lhs` arguments; the shape to internalize is:
 
 - `Op<Poly_Dialect, "add">` — ties the op to the dialect and names its
@@ -356,19 +356,19 @@ and plain `Polynomial:$lhs` arguments; the shape to internalize is:
   names aren't decoration: tablegen generates accessors `getLhs()`,
   `getRhs()`, `getOutput()` from them (verified in the generated
   `--gen-op-decls` output), plus typed `build(...)` overloads used by
-  `rewriter.create<AddOp>(...)` — Tutorial 3's rewriter API was consuming
+  `rewriter.create<AddOp>(...)` — Chapter 3's rewriter API was consuming
   generated methods like these all along.
 - Constraints compose: `Polynomial` (our own `def` from PolyTypes.td!) is
   itself a constraint meaning "must be a PolynomialType";
   `TensorOf<[AnyInteger]>` below means "tensor of any integer type"; the
   current file's `PolyOrContainer` relaxes "a poly" to "a poly, or a
-  tensor/vector of polys" (that generalization is Tutorial 6 business).
+  tensor/vector of polys" (that generalization is Chapter 6 business).
 - `assemblyFormat` — same idea as for types: `$lhs`, `$rhs` splice
   operands, `attr-dict` is a mandatory slot for discretionary attributes,
   and `type(...)` directives say where types appear. Because
-  `SameOperandsAndResultType` (Tutorial 6) guarantees all three types
+  `SameOperandsAndResultType` (Chapter 6) guarantees all three types
   match, one type suffices: `poly.add %a, %b : !poly.poly<10>`. The
-  article's pre-trait version spelled all types:
+  earlier pre-trait version spelled all types:
   `... : (!poly.poly<10>, !poly.poly<10>) -> !poly.poly<10>`.
 
 Then the ops that cross the dialect boundary — polynomials have to come
@@ -381,24 +381,24 @@ def Poly_FromTensorOp : Op<Poly_Dialect, "from_tensor", [Pure]> {
   let arguments = (ins TensorOf<[AnyInteger]>:$input);
   let results = (outs Polynomial:$output);
   let assemblyFormat = "$input attr-dict `:` type($input) `->` qualified(type($output))";
-  let hasFolder = 1;  // Tutorial 7
+  let hasFolder = 1;  // Chapter 7
 }
 
 def Poly_EvalOp : Op<Poly_Dialect, "eval",
-    [AllTypesMatch<["point", "output"]>, Has32BitArguments]> {  // Tutorial 6/8
+    [AllTypesMatch<["point", "output"]>, Has32BitArguments]> {  // Chapter 6/8
   let summary = "Evaluates a Polynomial at a given input value.";
   let arguments = (ins Polynomial:$polynomial, IntOrComplex:$point);
   let results = (outs IntOrComplex:$output);
   let assemblyFormat = "$polynomial `,` $point attr-dict `:` `(` qualified(type($polynomial)) `,` type($point) `)` `->` type($output)";
-  let hasVerifier = 1;      // Tutorial 8
-  let hasCanonicalizer = 1; // Tutorial 9
+  let hasVerifier = 1;      // Chapter 8
+  let hasCanonicalizer = 1; // Chapter 9
 }
 ```
 
 `from_tensor` bridges *in* (a `tensor<3xi32>` of coefficients becomes a
 polynomial), `eval` bridges *out* (a polynomial and a point produce a
 number). The current file also has `to_tensor` and a `poly.constant` op —
-both arrive in later tutorials.
+both arrive in later chapters.
 
 ## 6. Wiring it into C++ and the build
 
@@ -439,9 +439,10 @@ included *twice* — once with `GET_TYPEDEF_CLASSES` to emit the class
 definitions, once with `GET_TYPEDEF_LIST` where it expands to just a
 comma-separated list of type names, which lands inside `addTypes<...>()` as
 its template arguments. That's the whole registration: `initialize()` hands
-the dialect its types and ops. (The article notes the mild ugliness that
-so much must be included into this one `.cpp`; it explored alternatives
-and found nothing better — dialect `.cpp` files in real projects are long.)
+the dialect its types and ops. (The mild ugliness of how much must be
+included into this one `.cpp` is real; this codebase's author explored
+alternatives and found nothing better — dialect `.cpp` files in real
+projects are long.)
 
 The build has one `gentbl_cc_library` per tablegen file
 ([`BUILD`](../lib/Dialect/Poly/BUILD)), each running two backends, plus a
@@ -463,7 +464,7 @@ gentbl_cc_library(name = "ops_inc_gen",    # -gen-op-decls / -defs
     ...)
 ```
 
-Same pattern as Tutorial 4's `pass_inc_gen`, three times over with
+Same pattern as Chapter 4's `pass_inc_gen`, three times over with
 different backends. The CMake side
 ([`CMakeLists.txt`](../lib/Dialect/Poly/CMakeLists.txt)) uses
 `add_mlir_dialect(...)` which bundles these backend invocations into one
@@ -473,7 +474,7 @@ call.
 
 [`tests/poly_syntax.mlir`](../tests/poly_syntax.mlir) is a pure
 round-tripping test — no passes, just "does this parse and re-print". Run
-it (with `$TUTORIAL_OPT` from Tutorial 3):
+it (with `$TUTORIAL_OPT` from Chapter 3):
 
 ```bash
 $TUTORIAL_OPT tests/poly_syntax.mlir
@@ -510,7 +511,7 @@ Parsing back what the printer emits is exactly what the test locks in —
 if your `assemblyFormat` prints something its own parser rejects, this is
 where you find out. (The printer also renumbers: the source file's
 `%p0`-style and `%12`-style names come back as sequential `%0, %1, ...` —
-SSA names are not semantic, as Tutorial 2's capture variables already
+SSA names are not semantic, as Chapter 2's capture variables already
 insisted.)
 
 ### What do these values *mean*?
@@ -532,25 +533,25 @@ function through that lens is good practice. Writing `p₀ = %arg0` and
 | `%3`  | the concrete polynomial **1 + 2x + 3x²** (coefficient `[1,2,3]`, index = power of x) |
 | `%4`  | `%3` evaluated at 7: 1 + 2·7 + 3·7² = **162** : i32 |
 | `%5`  | `%3` evaluated at 1+2i: 1 + 2(1+2i) + 3(1+2i)² = **−6 + 16i** (eval accepts complex points — that's the `IntOrComplex` constraint) |
-| `%6`  | elementwise (Tutorial 6): the tensor `[2p₀, 2p₁]` |
+| `%6`  | elementwise (Chapter 6): the tensor `[2p₀, 2p₁]` |
 | `%7`, `%8`, `%9` | all the *same* polynomial **2 + 3x + 4x²** — stored as i32, as i8, and (in the source) as the hex blob `dense<"0x020304">`; the printer proving the point by rendering all three as `[2, 3, 4]` |
-| `%10` | 100 coefficients, all 4, in a 10-slot ring: x¹⁰ ≡ 1 reduces it to **40·(1 + x + ... + x⁹)**. Note nothing *checks* coefficient count against the degree bound — the attribute happily stores 100 entries; reduction is a semantic fact, not a syntactic one (verification is Tutorial 8's business) |
+| `%10` | 100 coefficients, all 4, in a 10-slot ring: x¹⁰ ≡ 1 reduces it to **40·(1 + x + ... + x⁹)**. Note nothing *checks* coefficient count against the degree bound — the attribute happily stores 100 entries; reduction is a semantic fact, not a syntactic one (verification is Chapter 8's business) |
 | `%11` | the coefficient tensor of `%1`, now with its static length 10 visible in the type `tensor<10xi32>` |
 
 None of these "happen" today — but they're not hypothetical either: once
-Tutorial 7 gives the ops folders, the compiler itself performs exactly
+Chapter 7 gives the ops folders, the compiler itself performs exactly
 this arithmetic on the constant-valued ones at compile time (and you can
 check the numbers above against it).
 
-A confession from writing this tutorial: the repo's test file contained a
-bug that this tutorial's verification pass caught. Its second line read
-`// RUN FileCheck %s < %t` — missing the colon after `RUN`. Per Tutorial
+A confession from writing this chapter: the repo's test file contained a
+bug that this chapter's verification pass caught. Its second line read
+`// RUN FileCheck %s < %t` — missing the colon after `RUN`. Per Chapter
 2, lit only executes `RUN:` lines; without the colon the line is an
 ordinary comment, so the test ran `tutorial-opt` and *never checked its
 output* — all the `// CHECK:` lines were dead weight. It has been fixed to
 `// RUN: FileCheck %s < %t` (and verified to pass). Two morals: a test
 that can't fail is not a test, and typos in magic comments fail *silently*
-— when adding a lit test, break it once on purpose (Tutorial 2 §7) to
+— when adding a lit test, break it once on purpose (Chapter 2 §7) to
 prove it's alive.
 
 Bad inputs are worth trying too. A malformed type parameter gets a
@@ -571,30 +572,13 @@ bazel test //tests:poly_syntax.mlir.test              # Bazel
 llvm-lit -sv build-ninja/tests --filter poly_syntax   # CMake
 ```
 
-## Differences from the original article
-
-- **The repo's op definitions are from the series' future.** Relative to
-  article 5, `Poly_BinOp` gained a trait list
-  (`[Pure, ElementwiseMappable, SameOperandsAndResultType]`, Tutorial 6)
-  and `hasFolder`/`hasCanonicalizer` (Tutorials 7/9); `eval` gained
-  `AllTypesMatch`, `Has32BitArguments`, and `hasVerifier` (Tutorials 6/8);
-  arguments widened from `Polynomial` to `PolyOrContainer`; and
-  `to_tensor` + `poly.constant` (with the dialect's
-  `hasConstantMaterializer`) joined the family (Tutorial 7).
-- **The binop syntax is shorter now**: one type after the colon instead of
-  the article's `(type, type) -> type`, a consequence of
-  `SameOperandsAndResultType`.
-- **Upstream MLIR now ships a `polynomial` dialect** grown from this
-  tutorial's design — visible beside `poly` in `--help`. The article
-  predates it.
-
 ## Where to go next
 
 The dialect parses, prints, and round-trips — but it doesn't *do* anything
 yet: nothing checks semantic invariants beyond types, nothing simplifies
 `poly.add` of constants, and nothing lowers `poly` to real arithmetic.
 That begins with
-[Tutorial 6: Using Traits](06-using-traits.md):
+[Chapter 6: Using Traits](06-using-traits.md):
 those bracketed lists (`[Pure, ElementwiseMappable, ...]`) we skipped over
 are declarative hooks into upstream passes — and the reason `--cse` and
 friends will just work on `poly` ops.
@@ -608,7 +592,7 @@ friends will just work on `poly` ops.
    result, both `Polynomial`) to a *copy* of `PolyOps.td` and regenerate
    with `--gen-op-decls`. Find its generated accessor and builders. What
    `assemblyFormat` would make it print as `poly.neg %x : !poly.poly<10>`?
-3. Foreshadowing Tutorial 6: evaluate a polynomial at an `i64` point —
+3. Foreshadowing Chapter 6: evaluate a polynomial at an `i64` point —
    `poly.eval %p, %c : (!poly.poly<10>, i64) -> i64` — and run it through
    `tutorial-opt`. The error (`'poly.eval' op requires each numeric operand
    to be a 32-bit integer`) comes from that mysterious `Has32BitArguments`
@@ -619,6 +603,9 @@ friends will just work on `poly` ops.
    what would happen if `from_tensor`'s format omitted `type($input)`?
    (Could the parser know what tensor type to expect?)
 5. In the `--help` output, compare `poly` with upstream's `polynomial`
-   dialect docs ([mlir.llvm.org](https://mlir.llvm.org/docs/Dialects/PolynomialDialect/)) —
+   dialect docs
+   ([archived copy](https://web.archive.org/web/20241226114248/https://mlir.llvm.org/docs/Dialects/PolynomialDialect/)
+   — the dialect has since been removed from upstream MLIR, so the live
+   docs page is gone) —
    how did the upstream version generalize the coefficient type that our
    `poly` hardcodes as 32-bit?

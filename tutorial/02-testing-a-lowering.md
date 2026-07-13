@@ -1,13 +1,10 @@
-# Tutorial 2: Testing a Lowering
+# Chapter 2: Testing a Lowering
 
-This tutorial covers the second half of the article
-[Running and Testing a Lowering](https://jeremykun.com/2023/08/10/mlir-running-and-testing-a-lowering/).
-It picks up where [Tutorial 1](01-mlir-basics-and-running-a-lowering.md) left
-off: we ran the `--convert-math-to-funcs=convert-ctlz` lowering by hand and
-saw its output — now we turn that into automated tests. The content is
-adapted to the current state of this repository, so some commands and file
-contents differ slightly from the original article (see
-[Differences from the original article](#differences-from-the-original-article)).
+This chapter picks up where
+[Chapter 1](01-mlir-basics-and-running-a-lowering.md) left off: we ran the
+`--convert-math-to-funcs=convert-ctlz` lowering by hand and saw its output —
+now we turn that into automated tests, using the same tools every LLVM and
+MLIR project uses.
 
 **What you will learn:**
 
@@ -22,14 +19,14 @@ contents differ slightly from the original article (see
 - How to *execute* lowered MLIR code with `mlir-runner` to test its behavior,
   not just its syntax.
 
-**Prerequisites:** [Tutorial 1](01-mlir-basics-and-running-a-lowering.md),
+**Prerequisites:** [Chapter 1](01-mlir-basics-and-running-a-lowering.md),
 and a working build as described in the top-level [README.md](../README.md).
 
 ---
 
 ## 1. Concepts: lit and FileCheck
 
-In Tutorial 1 we verified the ctlz lowering by eyeballing `mlir-opt` output.
+In Chapter 1 we verified the ctlz lowering by eyeballing `mlir-opt` output.
 How do we lock that behavior in as a test? A compiler is an awkward thing to
 unit-test: its inputs and outputs are large strings in domain-specific
 languages, and what you usually want to assert is "when I run *this tool*
@@ -37,16 +34,17 @@ on *this program*, the output has *this shape*". LLVM and MLIR grew a pair
 of tools for exactly that, and this repo (like every MLIR project) uses
 them:
 
-- **`lit`** (LLVM Integrated Tester) discovers test files and runs the shell
-  commands embedded in them.
-- **`FileCheck`** makes assertions about the output of those commands.
+- **[`lit`](https://llvm.org/docs/CommandGuide/lit.html)** (LLVM Integrated
+  Tester) discovers test files and runs the shell commands embedded in them.
+- **[`FileCheck`](https://llvm.org/docs/CommandGuide/FileCheck.html)** makes
+  assertions about the output of those commands.
 
 Both live *inside* the test file, as specially formatted comments: `RUN:`
 comments tell lit what commands to execute, and `CHECK` comments tell
 FileCheck what the output of those commands must (and must not) contain.
 The test *is* the input program, annotated.
 
-The plan for this tutorial: get the tools (section 2), learn FileCheck's
+The plan for this chapter: get the tools (section 2), learn FileCheck's
 directive language on a small self-contained example (section 3), then read
 and run this repo's real ctlz tests (sections 4–5), see how Bazel and CMake
 automate the whole thing (sections 6–7), and finish by testing *behavior*
@@ -75,7 +73,7 @@ MLIR_RUNNER=$(bazel cquery --output=files @llvm-project//mlir:mlir-runner)
 
 > **CMake users:** skip the above — the tools live in the `bin/` directory
 > of whatever LLVM build you configured against. Set the same three
-> variables and every later command in this tutorial works verbatim:
+> variables and every later command in this chapter works verbatim:
 >
 > ```bash
 > # if you built the LLVM submodule per the README:
@@ -88,7 +86,7 @@ MLIR_RUNNER=$(bazel cquery --output=files @llvm-project//mlir:mlir-runner)
 > MLIR_RUNNER=$LLVM_BIN/mlir-runner
 > ```
 
-Run every command in this tutorial from the repo root (the Bazel variables
+Run every command in this chapter from the repo root (the Bazel variables
 above may hold repo-relative paths).
 
 ## 3. A FileCheck primer, one directive at a time
@@ -558,7 +556,7 @@ pieces make that work:
 governs the filegroup: **every program a `RUN:` line invokes must be in
 this list** — Bazel tests run sandboxed, so a tool that isn't declared
 simply doesn't exist there, and the test fails with a "binary not found"
-error. (The article hits exactly this when adding `mlir-cpu-runner` for
+error. (This codebase's author hit exactly this when adding the runner for
 section 8's functional test.) Read the `data` list with that rule in mind:
 
 ***tests/BUILD*** (excerpt)
@@ -588,9 +586,9 @@ glob_lit_tests()
 
 Entry by entry:
 
-- **The tutorial's future is visible in the list:** `tutorial-opt` (this
-  repo's own pass driver, from Tutorial 3 on), `mlir-translate`, `llc`,
-  and `clang` (the path to a native executable, Tutorial 11).
+- **The book's future is visible in the list:** `tutorial-opt` (this
+  repo's own pass driver, from Chapter 3 on), `mlir-translate`, `llc`,
+  and `clang` (the path to a native executable, Chapter 11).
 - **The two oddballs, `not` and `count`, are tiny LLVM test helpers:**
   `not` inverts a command's exit code, so a `RUN` line can assert that a
   command *fails* — that is how section 3's demo file checks in its two
@@ -660,9 +658,10 @@ config.substitutions.extend(substitutions.items())
 
 Reading it top to bottom:
 
-- The `config` object is nowhere imported — lit injects it into the
-  module's scope when it executes this file (the file's own comment calls
-  this "odd", fairly).
+- The `config` object is nowhere imported — the
+  [lit documentation](https://llvm.org/docs/CommandGuide/lit.html#test-suites)
+  states that an instance is inserted into the module's scope when lit
+  executes this file (the file's own comment calls this "odd", fairly).
 - `config.suffixes = [".mlir"]` is the test-discovery rule: every `.mlir`
   file in the directory is a test. `ShTest()` means "execute the `RUN:`
   lines as shell commands".
@@ -678,12 +677,10 @@ Reading it top to bottom:
   mentioned in section 4 (later tests use it to reference source files like
   `tests/poly_to_llvm_main.c` by absolute path).
 
-> **A warning from the article, since resolved:** at the time of writing,
-> Bazel used the *system* Python to run lit, so the test runner died with
-> "python cannot find the `lit` module" unless you had run
-> `pip install lit` yourself (see
-> [mlir-tutorial issue #8](https://github.com/j2kun/mlir-tutorial/issues/8)).
-> Today the repo pins a hermetic Python 3.13 plus `lit==18.1.8` in
+> **Why the pinned Python matters:** lit is a Python module, so a test
+> runner that relied on the *system* Python would die with "python cannot
+> find the `lit` module" unless you had run `pip install lit` yourself.
+> Instead the repo pins a hermetic Python 3.13 plus `lit==18.1.8` in
 > [`MODULE.bazel`](../MODULE.bazel) and [`requirements.txt`](../requirements.txt)
 > — that's the `@mlir_tutorial_pip_deps//lit` entry in the filegroup above —
 > so no system-Python setup is needed for the Bazel flow.
@@ -818,7 +815,7 @@ New pieces, one at a time:
 one lowering is not enough — we must chain the whole staircase down.
 `-pass-pipeline` runs an explicit sequence:
 
-1. `convert-math-to-funcs{convert-ctlz}` — the pass from Tutorial 1 (`{...}`
+1. `convert-math-to-funcs{convert-ctlz}` — the pass from Chapter 1 (`{...}`
    is the pipeline syntax for pass options): `math` → `scf`/`arith`.
 2. `func.func(convert-scf-to-cf,convert-arith-to-llvm)` — these two passes
    are wrapped in `func.func(...)`, meaning they run *on each function*
@@ -832,7 +829,8 @@ one lowering is not enough — we must chain the whole staircase down.
    remains).
 
 The whole pipeline is wrapped in `builtin.module(...)`, anchoring it at the
-top-level module.
+top-level module. (Older MLIR releases accepted a pipeline without this
+wrapper; current `mlir-opt` rejects the unwrapped syntax.)
 
 You can watch each stage of the staircase yourself with the section-2 shell
 variables. Run just the pipeline, without the runner:
@@ -944,45 +942,19 @@ This is a *functional* test: if someone changed the lowering to generate
 subtly wrong loop bounds, the syntactic tests from sections 4–5 might still
 pass, but this one would fail with `28` (or garbage) instead of `29`.
 
-## Differences from the original article
-
-The repository has moved forward since the article was written (against LLVM
-circa 2023). If you read the article side by side with this repo:
-
-- **`mlir-cpu-runner` is now `mlir-runner`** — upstream LLVM renamed the tool;
-  the test files and Bazel targets here use the new name.
-- **Bazel uses Bzlmod, not WORKSPACE** — dependencies live in `MODULE.bazel`,
-  and the runfiles paths in `lit.cfg.py` use mangled repo names like
-  `+_repo_rules+llvm-project` instead of `llvm-project`.
-- `--pass-pipeline` now requires the `builtin.module(...)` wrapper shown
-  above; the article's earlier syntax without it is rejected by newer
-  `mlir-opt`.
-- **The article's Python/lit warning no longer applies** — the repo now
-  pins a hermetic Python and the `lit` package via Bzlmod
-  (`MODULE.bazel` + `requirements.txt`), as described in section 6.
-- **Sections 3 and 5 go beyond the article.** The article shows the loose
-  test, says a "much more precise test" exists in a linked commit, and
-  mentions capture variables in one sentence — it never explains
-  `CHECK-LABEL`, `CHECK-SAME`, or `generate-test-checks.py`, even though
-  the committed `tests/ctlz.mlir` is built from all three. Section 3 is a
-  primer distilled from the
-  [FileCheck documentation](https://llvm.org/docs/CommandGuide/FileCheck.html),
-  and its demo file `tests/filecheck_directives.mlir` is an addition of
-  this repository, not part of the article's commits.
-
 ## Where to go next
 
-You have now seen the full workflow this tutorial series relies on: write
+You have now seen the full workflow this book relies on: write
 MLIR by hand, run passes on it with `mlir-opt`, and lock in behavior with
 lit/FileCheck tests.
-[Tutorial 3: Writing Our First Pass](03-writing-our-first-pass.md) uses
+[Chapter 3: Writing Our First Pass](03-writing-our-first-pass.md) uses
 exactly this workflow to build a custom pass — the `tutorial-opt` binary in
 this repo is the project's own version of `mlir-opt` that carries those
 custom passes.
 
 **Exercises**
 
-1. Copy the high-level ctlz program from Tutorial 1 into a scratch file and
+1. Copy the high-level ctlz program from Chapter 1 into a scratch file and
    run the full pipeline from section 8 on it with `mlir-opt`, but stop after
    step 2 (delete the last three passes). Look at the mix of `llvm`, `cf`,
    and `func` ops, and at the `unrealized_conversion_cast` ops that
@@ -1000,7 +972,7 @@ custom passes.
    `// NOCVT-NOT: __mlir_math_ctlz_i32` — and no `RUN` line in the file
    ever passes `--check-prefix=NOCVT`. FileCheck only looks for the
    prefixes it is told about, so this assertion has *never been checked*
-   (it has been dead since the original 2023 commit). Bring it to life:
+   (it has been dead since the file was written). Bring it to life:
    add a second `RUN` line that runs `mlir-opt` **without**
    `convert-ctlz` (i.e. `--convert-math-to-funcs` alone) and pipes into
    `FileCheck %s --check-prefix=NOCVT` — asserting that without the

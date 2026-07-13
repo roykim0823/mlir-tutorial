@@ -1,5 +1,5 @@
-// Driver for Tutorial 9's preserved C++ DifferenceOfSquares pattern
-// (scaffolding, not from the article). See README.md in this directory.
+// Driver for Chapter 9's preserved C++ DifferenceOfSquares pattern
+// (scaffolding around the frozen pattern). See README.md in this directory.
 #include "lib/Dialect/Poly/PolyDialect.h"
 #include "tutorial/code/09/DifferenceOfSquares.h"
 #include "mlir/include/mlir/InitAllDialects.h"

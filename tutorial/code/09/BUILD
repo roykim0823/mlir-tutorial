@@ -1,4 +1,4 @@
-# Frozen code for Tutorial 9 (Canonicalizers and DRR): the article's C++
+# Frozen code for Chapter 9 (Canonicalizers and DRR): the original C++
 # version of the DifferenceOfSquares pattern, exposed as a standalone pass.
 # The canonical, current version is the DRR pattern in
 # lib/Dialect/Poly/PolyPatterns.td.

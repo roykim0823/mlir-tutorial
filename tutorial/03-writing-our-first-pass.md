@@ -1,23 +1,19 @@
-# Tutorial 3: Writing Our First Pass
+# Chapter 3: Writing Our First Pass
 
-This is a step-by-step companion to the article
-[Writing Our First Pass](https://jeremykun.com/2023/08/10/mlir-writing-our-first-pass/).
-It picks up where [Tutorial 2](02-testing-a-lowering.md) left off: we can run
-upstream passes and test them — now we write passes of our own, organize them
-into a project, and build `tutorial-opt`, this project's own version of
-`mlir-opt` that carries them. The repo has evolved since the article was
-written, so some code differs from the article's listings (see
-[Differences from the original article](#differences-from-the-original-article)).
+This chapter picks up where [Chapter 2](02-testing-a-lowering.md) left off:
+we can run upstream passes and test them — now we write passes of our own,
+organize them into a project, and build `tutorial-opt`, this project's own
+version of `mlir-opt` that carries them.
 
-> **Heads-up before you read any code:** the pass code this tutorial
-> teaches is the article's hand-written form, and it is **not what
+> **Heads-up before you read any code:** the pass code this chapter
+> teaches is the original hand-written form, and it is **not what
 > `lib/` contains** — the main tree has since migrated the same passes
 > to tablegen-generated boilerplate (that migration is
-> [Tutorial 4](04-using-tablegen-for-passes.md)'s subject). The
+> [Chapter 4](04-using-tablegen-for-passes.md)'s subject). The
 > hand-written form is preserved, buildable, in
 > [`tutorial/code/03/`](code/03/) (`bazel build
 > //tutorial/code/03:tutorial-opt-03`); it registers the same flags and
-> produces the same output as `tutorial-opt` on this tutorial's tests, so
+> produces the same output as `tutorial-opt` on this chapter's tests, so
 > every command below works with either binary. A short
 > [What the repo has now](#what-the-repo-has-now) note at the end of
 > section 5 summarizes how `lib/`'s versions differ.
@@ -35,16 +31,16 @@ written, so some code differs from the article's listings (see
 - How the greedy rewrite driver applies competing patterns to a fixed
   point — with folding thrown in for free.
 
-**Prerequisites:** Tutorials [1](01-mlir-basics-and-running-a-lowering.md)
+**Prerequisites:** Chapters [1](01-mlir-basics-and-running-a-lowering.md)
 and [2](02-testing-a-lowering.md), and a build that can produce
 `tutorial-opt`. With Bazel that is automatic (the commands below build it on
 first use). With CMake, `tutorial-opt` only builds against the LLVM
 **submodule** — you must have checked out and built
 `externals/llvm-project` per the README; a system-installed LLVM will not
-work (see Tutorial 2's CMake notes).
+work (see Chapter 2's CMake notes).
 
 Set a shell variable once so the commands below work for either build
-system, mirroring Tutorial 2's pattern:
+system, mirroring Chapter 2's pattern:
 
 ```bash
 # Bazel (build it once, then use the binary directly):
@@ -63,29 +59,32 @@ TUTORIAL_OPT=build-ninja/tools/tutorial-opt
 A **pass** is a unit of work that traverses the IR and analyzes or
 transforms it. Everything a compiler does between parsing and emitting
 machine code is organized as a pipeline of passes — the lowerings of
-Tutorials 1–2 were passes; so are classic optimizations. A pass doesn't
+Chapters 1–2 were passes; so are classic optimizations. A pass doesn't
 have to lower anything: it can rewrite IR *within* one abstraction level,
-which is what both passes in this tutorial do.
+which is what both passes in this chapter do.
 
-Our first example operates on the **`affine` dialect** — the highest-level
-loop dialect in MLIR, and the reason Tutorial 1 said "keep the program at
-the right abstraction level for each optimization." Affine loops are loops
-whose bounds and index expressions are *affine functions* (sums of
+Our first example operates on the
+**[`affine` dialect](https://mlir.llvm.org/docs/Dialects/Affine/)** — the
+highest-level loop dialect in MLIR, and the reason Chapter 1 said "keep the
+program at the right abstraction level for each optimization." Affine loops
+are loops whose bounds and index expressions are *affine functions* (sums of
 variables times constants, like `2*i + j + 5`) of loop variables and
 symbols. That restriction is what the dialect sells: it was originally
 built for polyhedral loop analysis — a mathematical framework that studies
 loop nests via lattice theory — and it makes questions like "what is this
 loop's trip count?" statically answerable. An `scf.for` loop can have any
-dynamic bound; an `affine.for` loop is analyzable by construction.
+dynamic bound; an
+[`affine.for`](https://mlir.llvm.org/docs/Dialects/Affine/#affinefor-affineaffineforop)
+loop is analyzable by construction.
 
 We exploit exactly that: our pass **fully unrolls** every affine loop —
 replacing the loop with one copy of its body per iteration. Unrolling is a
 real optimization (it removes branch overhead and exposes parallelism, and
 in some domains — like the fully homomorphic encryption (FHE) compilers 
-this series builds toward — loops must be unrolled entirely because the 
+this book builds toward — loops must be unrolled entirely because the 
 target can't branch at all). But honestly, we picked it because MLIR 
 provides a one-call utility, `loopUnrollFull`, that does the work. 
-Both passes in this tutorial are deliberately thin: the point is to learn 
+Both passes in this chapter are deliberately thin: the point is to learn 
 how to *set up* a pass, navigate the IR through the C++ API, and modify it 
 — not to write a clever algorithm.
 
@@ -101,10 +100,10 @@ LLVM monorepo included) splits code into two parallel directory trees:
 Within each, conventional subdirectories signal a component's role:
 
 - `Transform/` — passes that transform code *within* a dialect (this
-  tutorial);
+  chapter);
 - `Conversion/` — passes that convert *between* dialects (the lowerings of
-  Tutorial 1; this repo's `lib/Conversion/PolyToStandard` arrives in a
-  later tutorial);
+  Chapter 1; this repo's `lib/Conversion/PolyToStandard` arrives in a
+  later chapter);
 - `Analysis/` — passes that compute information without modifying IR;
 - `Dialect/` — definitions of the dialects themselves.
 
@@ -112,21 +111,21 @@ This repo deviates in one deliberate way: **`include/` and `lib/` are
 merged** — every header sits next to its implementation file. The parallel
 tree exists in ordinary C++ projects partly to separate public interface
 from private implementation, but Bazel has finer-grained ways to enforce
-visibility, navigating mirrored trees is tedious, and this is a tutorial —
-simpler is better. So the layout relevant to this tutorial is:
+visibility, navigating mirrored trees is tedious, and this is a teaching
+codebase — simpler is better. So the layout relevant to this chapter is:
 
 ```
 lib/Transform/Affine/
-├── AffineFullUnroll.h                    # walk-based pass (this tutorial)
+├── AffineFullUnroll.h                    # walk-based pass (this chapter)
 ├── AffineFullUnroll.cpp
-├── AffineFullUnrollPatternRewrite.h      # pattern-based pass (this tutorial)
+├── AffineFullUnrollPatternRewrite.h      # pattern-based pass (this chapter)
 ├── AffineFullUnrollPatternRewrite.cpp
-├── Passes.td, Passes.h                   # tablegen boilerplate (Tutorial 4)
+├── Passes.td, Passes.h                   # tablegen boilerplate (Chapter 4)
 ├── BUILD                                 # Bazel targets
 └── CMakeLists.txt
 lib/Transform/Arith/
-├── MulToAdd.h, MulToAdd.cpp              # this tutorial
-├── ...                                   # PDLL variant, from a later article
+├── MulToAdd.h, MulToAdd.cpp              # this chapter
+├── ...                                   # PDLL variant, from a later chapter
 tools/
 ├── tutorial-opt.cpp                      # the project's `opt` binary
 ├── BUILD
@@ -153,8 +152,8 @@ provides the entire `mlir-opt` command-line experience — parsing input,
 verifying it, exposing every registered pass as a `--flag`, `--help`,
 `--pass-pipeline`, IR printing options — on top of whatever you registered.
 Here is [`tools/tutorial-opt.cpp`](../tools/tutorial-opt.cpp) trimmed to
-the parts that matter for this tutorial (the full file also registers
-dialects and a pipeline from later tutorials):
+the parts that matter for this chapter (the full file also registers
+dialects and a pipeline from later chapters):
 
 ***tools/tutorial-opt.cpp***
 ```cpp
@@ -192,8 +191,8 @@ Line by line:
 - `MlirOptMain(...)` runs the whole show; `asMainReturnCode` converts its
   `LogicalResult` into a process exit code.
 
-In this tutorial with no generated registration functions yet, the
-same hookup was an explicit `PassRegistration` line per pass. That version
+At this chapter's stage, with no generated registration functions yet, the
+same hookup is an explicit `PassRegistration` line per pass. That version
 of the driver is preserved — and buildable — as
 [`tutorial/code/03/tutorial-opt.cpp`](code/03/tutorial-opt.cpp); here it is
 in full (minus the orientation comment at the top of the file):
@@ -219,11 +218,11 @@ int main(int argc, char **argv) {
 }
 ```
 
-(The tutorial included the pass headers from `lib/Transform/...`;
+(The original code included the pass headers from `lib/Transform/...`;
 the preserved copy includes them from its own directory, because `lib/`'s
-headers have since been migrated — that migration is Tutorial 4, and the
+headers have since been migrated — that migration is Chapter 4, and the
 classes this driver registers, like `AffineFullUnrollPass`, are section
-4's subject. The heads-up at the top of this tutorial has the build
+4's subject. The heads-up at the top of this chapter has the build
 command for this version. One more visible difference: this driver has no
 `registerAllPasses()`, so `tutorial-opt-03 --help` lists *only* our three
 passes — the upstream-pass buffet is a later addition to the repo's
@@ -242,13 +241,13 @@ $TUTORIAL_OPT --help | grep -E 'affine-full-unroll|mul-to-add'
       --mul-to-add-pdll            -   Convert multiplications to repeated additions using pdll
 ```
 
-Three of these are this tutorial's subject (`--mul-to-add-pdll` belongs to
-a much later article). `--help` also lists hundreds of upstream passes:
+Three of these are this chapter's subject (`--mul-to-add-pdll` belongs to
+a much later chapter). `--help` also lists hundreds of upstream passes:
 your tool is a superset of `mlir-opt`.
 
 ## 4. Anatomy of a pass
 
-The tutorial defines the pass the from-scratch way, and it's worth
+This chapter defines the pass the from-scratch way, and it's worth
 understanding in full even though the repo has since moved to generated
 boilerplate (we'll get to that). In general, a pass is a C++ class that
 supplies three functions — one that does the work, two that name and
@@ -289,7 +288,11 @@ The second template argument deserves its own paragraph.
 `OperationPass<mlir::func::FuncOp>` **anchors** the pass to function
 operations: the pass manager will invoke `runOnOperation()` once per
 `func.func` in the module, and inside the pass, `getOperation()` returns
-the `FuncOp` currently being processed.
+the `FuncOp` currently being processed. (The MLIR docs formally describe
+[what is required of an
+OperationPass](https://mlir.llvm.org/docs/PassManagement/#operation-pass-static-filtering-by-op-type),
+and in particular limit this anchoring to specific operations like
+functions and modules.)
 
 
 
@@ -441,16 +444,19 @@ registration (the `registerAffinePasses()` from section 3), declared in
 visible difference in the body: the generated pass is *generic* (not
 anchored on `func.func`), so `getOperation()` returns an `Operation*` and
 the walk is spelled `getOperation()->walk` (arrow, not dot). The same goes
-for the other two passes in this tutorial. How and why to migrate is
-[Tutorial 4](04-using-tablegen-for-passes.md)'s whole subject — nothing
-more about it is needed today.
+for the other two passes in this chapter; the anchoring *concept* from
+section 4 is unchanged and returns in later chapters. How and why to
+migrate is [Chapter 4](04-using-tablegen-for-passes.md)'s whole subject —
+nothing more about it is needed today.
 
 ## 6. Step: run the unrolling pass
 
 The test input
 [`tests/affine_loop_unroll.mlir`](../tests/affine_loop_unroll.mlir) sums
 the 4 entries of a buffer (the `iter_args` loop-carried-sum idiom is
-explained in Tutorial 1 §4):
+explained in Chapter 1 §4; it exists to keep loops in compliance with SSA
+form — for more on SSA in MLIR, see
+[this MLIR doc](https://mlir.llvm.org/docs/LangRef/#high-level-structure)):
 
 ***tests/affine_loop_unroll.mlir***
 ```mlir
@@ -468,6 +474,7 @@ func.func @test_single_nested_loop(%buffer: memref<4xi32>) -> (i32) {
 (`memref` is a new dialect/type: a *memory reference*, MLIR's typed view of
 a buffer in memory — here, 4 `i32`s — with `affine.load` reading an element
 at an index. It's the bridge between SSA values and actual memory.)
+
 
 Run the pass on it:
 
@@ -528,7 +535,8 @@ failure, or the thing you computed."
 
 Two contract points before reading the code. First, inside
 `matchAndRewrite`, every mutation of the IR is supposed to go through the
-`PatternRewriter` argument: the rewriter is what makes a pattern
+[`PatternRewriter`](https://mlir.llvm.org/docs/PatternRewriter/#pattern-rewriter)
+argument: the rewriter is what makes a pattern
 *atomic*, guaranteeing the changes take effect only if the method runs to
 the end and succeeds. (Our pattern below violates this —
 `loopUnrollFull` has no variant that accepts a `PatternRewriter` — and
@@ -537,9 +545,10 @@ still anchored on `func.func`, but a pattern can match *any* op type: the
 rewrite engine performs the walk we wrote by hand in section 5 (an
 optional configuration struct can choose the walk order), collecting any
 number of patterns from a `RewritePatternSet` and greedily applying
-whichever ones match — in an order related to their `benefit` — until no
-operation matches, every applicable pattern returns failure, or a large
-iteration limit trips to avoid infinite loops.
+whichever ones match — in
+[an order related to their `benefit`](https://mlir.llvm.org/docs/PatternRewriter/#greedy-pattern-rewrite-driver)
+— until no operation matches, every applicable pattern returns failure, or
+a large iteration limit trips to avoid infinite loops.
 
 The preserved pass re-implements unrolling this way (the main tree's
 [twin](../lib/Transform/Affine/AffineFullUnrollPatternRewrite.cpp) has the
@@ -700,9 +709,10 @@ The specifics, phase by phase:
   the operation that produced the value — returning null if the type cannot be converted. 
   Here it asks: "is the right operand a constant
   integer?" (The source comment explains why checking only the *right*
-  operand suffices: MLIR's global canonicalization rules move constants to
-  the right of commutative ops, so `9*x` and `x*9` both arrive as
-  `muli %x, %c9`.)
+  operand suffices: MLIR's
+  [global canonicalization rules](https://mlir.llvm.org/docs/Canonicalization/#globally-applied-rules)
+  move constants to the right of commutative ops, so `9*x` and `x*9` both
+  arrive as `muli %x, %c9`.)
 - `(value & (value - 1)) == 0` is the classic power-of-two bit trick.
 - Every non-match exits with `failure()` **before any mutation**. This is
   the pattern-writing contract: a pattern must not touch the IR and then
@@ -715,8 +725,10 @@ The specifics, phase by phase:
   produce meaningful diagnostics after many rounds of rewriting; reusing
   the original ops' locations keeps that chain intact.
 - `rewriter.getIntegerAttr(type, value)` builds the compile-time constant
-  *attribute* the new `ConstantOp` holds (attributes are how ops store
-  static data, as opposed to runtime SSA operands).
+  [*attribute*](https://mlir.llvm.org/docs/LangRef/#attributes) the new
+  `ConstantOp` holds (attributes are how ops store static data, as opposed
+  to runtime SSA operands — you can put strings or dictionaries in an
+  attribute, but for `ConstantOp` it's just an int).
 - `rewriter.replaceOp(op, newAdd)` rewires all uses of `op`'s results to
   `newAdd`'s results and deletes `op` — the moral equivalent of "return the
   new expression."
@@ -731,7 +743,7 @@ power-of-two check:
 ```cpp
     ConstantOp newConstant = rewriter.create<ConstantOp>(
         rhsDefiningOp.getLoc(),
-        rewriter.getIntegerAttr(rhs.getType(), value - 1));  // value - 1 instead of value / 2  // value - 1 instead of value / 2
+        rewriter.getIntegerAttr(rhs.getType(), value - 1));  // value - 1 instead of value / 2
     MulIOp newMul = rewriter.create<MulIOp>(op.getLoc(), lhs, newConstant);
     AddIOp newAdd = rewriter.create<AddIOp>(op.getLoc(), newMul, lhs);
 
@@ -845,7 +857,7 @@ cc_library(
     srcs = ["AffineFullUnroll.cpp"],
     hdrs = ["AffineFullUnroll.h", "Passes.h"],
     deps = [
-        ":pass_inc_gen",                       # tablegen output (Tutorial 4)
+        ":pass_inc_gen",                       # tablegen output (Chapter 4)
         "@llvm-project//mlir:AffineDialect",
         "@llvm-project//mlir:AffineUtils",     # provides loopUnrollFull
         "@llvm-project//mlir:Pass",
@@ -868,7 +880,7 @@ cc_binary(
         "@llvm-project//mlir:AllPassesAndDialects",
         "@llvm-project//mlir:MlirOptLib",
         "@llvm-project//mlir:Pass",
-        # ... deps for later tutorials trimmed ...
+        # ... deps for later chapters trimmed ...
     ],
 )
 ```
@@ -885,7 +897,7 @@ wiring for the preserved version, minus the tablegen rule.)
 
 ## 11. Step: test the passes
 
-The lit/FileCheck machinery from Tutorial 2 applies unchanged — the only
+The lit/FileCheck machinery from Chapter 2 applies unchanged — the only
 news is that `RUN` lines now invoke `tutorial-opt`, which is on lit's
 `$PATH` because the Bazel `test_utilities` filegroup includes
 `//tools:tutorial-opt` (CMake: the lit config puts the build's `tools/` dir
@@ -908,10 +920,10 @@ func.func @test_single_nested_loop(%buffer: memref<4xi32>) -> (i32) {
 
 One file tests both pass variants: two RUN pipelines, same CHECK
 assertions — "whatever else you produce, no `affine.for` may survive." A
-deliberately loose test (Tutorial 2's trade-off discussion): it stays green
+deliberately loose test (Chapter 2's trade-off discussion): it stays green
 across both implementations and any future cleanup changes. The
 `mul_to_add.mlir` test is the opposite call — it pins the exact addition
-chain with the capture-variable style from Tutorial 2 §5, because the
+chain with the capture-variable style from Chapter 2 §5, because the
 addition structure *is* the pass's contract. The file also has a second
 test function with a *nested* loop, checking that `walk` reaches inner
 loops.
@@ -934,40 +946,22 @@ Total Discovered Tests: 18
 
 ## 12. Bonus: developer tooling
 
-Two quality-of-life notes from the article, both still wired up in this
-repo:
+Two quality-of-life notes, both wired up in this repo:
 
 - **IDE support (clangd).** C++ editing without a language server is
   painful, and clangd needs a `compile_commands.json`. For Bazel, the repo
   includes [Hedron's compile-commands
   extractor](https://github.com/hedronvision/bazel-compile-commands-extractor)
   (see `MODULE.bazel`): run `bazel run @hedron_compile_commands//:refresh_all`
-  to (re)generate it, and rerun after editing any `BUILD` file. For CMake,
-  `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` does the same job.
+  to (re)generate it, and rerun after editing any `BUILD` file — clangd and
+  clang-tidy then find [the generated json
+  file](https://clang.llvm.org/docs/JSONCompilationDatabase.html)
+  automatically. For CMake, `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` does the
+  same job.
 - **CI.** `.github/workflows/build_and_test.yml` (and a CMake twin) builds
   and tests every push. The Bazel cache action matters: a cold LLVM build
   takes 1–2 hours in CI, a cached one a few minutes — the same economics
   you experience locally.
-
-## Differences from the original article
-
-- **The main tree's pass boilerplate is generated now.** This tutorial
-  teaches the article's hand-written `PassWrapper` form (preserved,
-  buildable, in [`tutorial/code/03/`](code/03/) — see the heads-up at the
-  top); the repo's `lib/` declares the same passes in `Passes.td`,
-  inherits from tablegen-generated `impl::<Name>Base` classes, and
-  registers them via generated `register*Passes()` functions instead of
-  explicit `PassRegistration<...>()` lines. The `runOnOperation` bodies
-  are unchanged (see section 5's "What the repo has now"). The migration
-  is exactly the subject of the next article/tutorial.
-- **`lib/`'s passes are no longer anchored to `func.func`.** The article
-  (and this tutorial's code) defines `OperationPass<FuncOp>`; the current
-  tablegen declarations are generic passes, which is why `lib/`'s bodies
-  read `getOperation()->walk` (an `Operation*`) rather than
-  `getOperation().walk` (a `FuncOp`). The anchoring *concept* (section 4)
-  is unchanged and returns in later tutorials.
-- `lib/Transform/Arith` additionally contains a PDLL variant of MulToAdd
-  (`--mul-to-add-pdll`) from a much later article — ignore it for now.
 
 ## Where to go next
 
@@ -975,7 +969,7 @@ You have now written (well, read — the exercises fix that) both styles of
 pass, know why passes are anchored, and have the rewriter vocabulary: match
 via `getDefiningOp`, rewrite via `rewriter.create`/`replaceOp`/`eraseOp`,
 and let the greedy driver handle iteration. Next,
-[Tutorial 4: Using Tablegen for Passes](04-using-tablegen-for-passes.md)
+[Chapter 4: Using Tablegen for Passes](04-using-tablegen-for-passes.md)
 covers the tablegen machinery that generated those `impl::...Base`
 classes — `Passes.td`, `Passes.h.inc`, and the `pass_inc_gen` build rule
 from section 10 — eliminating the last of the boilerplate.

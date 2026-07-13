@@ -1,10 +1,11 @@
-# Tutorial 1: MLIR Basics and Running a Lowering
+# Chapter 1: MLIR Basics and Running a Lowering
 
-This tutorial covers the first half of the article
-[Running and Testing a Lowering](https://jeremykun.com/2023/08/10/mlir-running-and-testing-a-lowering/):
-what MLIR programs look like, how to read them, and how to run your first
-pass with `mlir-opt`. The second half of the article — testing — is covered in
-[Tutorial 2](02-testing-a-lowering.md).
+This chapter is where the book begins: what MLIR programs look like, how to
+read them, and how to run your first pass with `mlir-opt`. Everything the
+later chapters build — a custom dialect, its optimizations, its descent to
+native code — starts from the reading skills and the one tool introduced
+here. The natural companion skill, testing, is the subject of
+[Chapter 2](02-testing-a-lowering.md).
 
 **What you will learn:**
 
@@ -31,18 +32,23 @@ between many small IRs. Its two central concepts:
 
 - A **dialect** is a self-contained set of operations (and possibly types)
   with defined semantics. Dialects can sit at very different levels of
-  abstraction. In this tutorial you will meet:
-  - `func` — function definitions, calls, and returns (`func.func`,
-    `func.call`, `func.return`).
-  - `math` — high-level math operations like `math.ctlz` ("count leading
-    zeros").
-  - `arith` — basic arithmetic and comparisons (`arith.constant`,
-    `arith.addi`, `arith.cmpi`, `arith.shli`).
-  - `scf` — *structured control flow*: loops and conditionals that are still
-    visible as loops and conditionals (`scf.for`, `scf.if`, `scf.yield`).
-  - `cf` — *unstructured control flow*: basic blocks and branches, one step
-    closer to assembly.
-  - `llvm` — an MLIR mirror of LLVM IR, the exit door out of MLIR.
+  abstraction. In this chapter you will meet:
+  - [`func`](https://mlir.llvm.org/docs/Dialects/Func/) — function
+    definitions, calls, and returns (`func.func`, `func.call`,
+    `func.return`).
+  - [`math`](https://mlir.llvm.org/docs/Dialects/MathOps/) — high-level math
+    operations like `math.ctlz` ("count leading zeros").
+  - [`arith`](https://mlir.llvm.org/docs/Dialects/ArithOps/) — basic
+    arithmetic and comparisons (`arith.constant`, `arith.addi`, `arith.cmpi`,
+    `arith.shli`).
+  - [`scf`](https://mlir.llvm.org/docs/Dialects/SCFDialect/) — *structured
+    control flow*: loops and conditionals that are still visible as loops and
+    conditionals (`scf.for`, `scf.if`, `scf.yield`).
+  - [`cf`](https://mlir.llvm.org/docs/Dialects/ControlFlowDialect/) —
+    *unstructured control flow*: basic blocks and branches, one step closer
+    to assembly.
+  - [`llvm`](https://mlir.llvm.org/docs/Dialects/LLVM/) — an MLIR mirror of
+    LLVM IR, the exit door out of MLIR.
 
 - A **lowering** (or *conversion pass*) rewrites operations from one dialect
   into equivalent operations of lower-level dialects. Compilation in MLIR is
@@ -93,9 +99,10 @@ apart:
 ```
 
 An operation consumes zero or more operands (SSA values) and produces zero
-or more results; the trailing type annotation says what flows through.
-There is no expression nesting like `f(g(x))` — every intermediate result
-gets a name on its own line. When you meet an unfamiliar op, the
+or more results; the trailing type annotation says what flows through. (The
+[LangRef section on operations](https://mlir.llvm.org/docs/LangRef/#operations)
+gives the complete spec of this structure.) There is no expression nesting
+like `f(g(x))` — every intermediate result gets a name on its own line. When you meet an unfamiliar op, the
 [dialect documentation](https://mlir.llvm.org/docs/Dialects/) lists every
 op with its operands, results, and semantics —
 [`math.ctlz`](https://mlir.llvm.org/docs/Dialects/MathOps/#mathctlz-mathcountleadingzerosop)
@@ -194,11 +201,15 @@ bazel run @llvm-project//mlir:mlir-opt -- \
 Read this once and MLIR loses most of its mystery: an operation is a name
 in quotes, a list of operand values in parens, a dictionary of static
 *attributes* in `<{...}>` (the function's name and type are just data!),
-and optionally a brace-enclosed *region* of code — which is how a "module
-contains functions" and a "function contains a body" are modeled. Even
-`module` is an ordinary operation. The `^bb0(...)` label names the entry
-*block* of the function's region; blocks become important when we lower to
-branch-based control flow in Tutorial 2.
+and optionally a brace-enclosed
+[*region*](https://mlir.llvm.org/docs/LangRef/#regions) of code — which is
+how a "module contains functions" and a "function contains a body" are
+modeled. Even `module` is an ordinary operation. The `^bb0(...)` label names
+the entry [*block*](https://mlir.llvm.org/docs/LangRef/#blocks) of the
+function's region — a block is a list of operations with exactly one entry
+and one exit point (the classical compiler notion of a *basic block*);
+blocks become important when we lower to branch-based control flow in
+Chapter 2.
 
 > **CMake users:** if you built via the CMake instructions in the README, the
 > same binary is at `externals/llvm-project/build/bin/mlir-opt`, and you can
@@ -270,7 +281,8 @@ slowly:
 
 - `index` is a distinct type from `i32`: a platform-dependent integer used
   for loop bounds and indexing (like `size_t` in C). The loop counter is an
-  `index`; the values being computed are `i32`.
+  `index`; the values being computed are `i32`. (More details on `index` in
+  [the MLIR rationale docs](https://mlir.llvm.org/docs/Rationale/Rationale/#integer-signedness-semantics).)
 - `scf.for ... iter_args(...)` — loop-carried values. Since SSA values can't
   be reassigned, the loop threads its state (`%arg2`, the shifting copy of
   the input, and `%arg3`, the running count) through `iter_args`, and each
@@ -284,18 +296,20 @@ slowly:
   gets its own copy.
 
 Every registered pass gets its own command-line flag like
-`--convert-math-to-funcs`. You can chain several passes with repeated flags,
-or use `--pass-pipeline` for precise control (Tutorial 2 needs that when
-lowering all the way to executable code).
+`--convert-math-to-funcs`. The MLIR documentation keeps a
+[complete list of passes](https://mlir.llvm.org/docs/Passes/) owned by the
+upstream project. You can chain several passes with repeated flags, or use
+`--pass-pipeline` for precise control (Chapter 2 needs that when lowering
+all the way to executable code).
 
 ## Where to go next
 
 You can now write MLIR by hand, check it with `mlir-opt`, and run an existing
 lowering on it. The natural next question is: *how do we make sure a lowering
 keeps working as the code evolves?* That is the subject of
-[Tutorial 2: Testing a Lowering](02-testing-a-lowering.md), which introduces
+[Chapter 2: Testing a Lowering](02-testing-a-lowering.md), which introduces
 `lit` and `FileCheck` — the testing tools used by all of LLVM and by the rest
-of this tutorial series.
+of this book.
 
 **Exercises**
 
@@ -306,6 +320,6 @@ of this tutorial series.
    defined; misspell a dialect name (`arith.mulli`).
 2. Walk through the generated `@__mlir_math_ctlz_i32` by hand with the input
    `7 : i32` (binary `0...0111`) and convince yourself the result is 29.
-   Tutorial 2 turns exactly this check into an automated test.
+   Chapter 2 turns exactly this check into an automated test.
 3. Run `mlir-opt --help | grep convert-` to see the full list of available
    conversion passes. The names alone sketch MLIR's lowering landscape.

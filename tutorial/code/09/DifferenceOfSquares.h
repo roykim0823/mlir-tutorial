@@ -8,11 +8,10 @@ namespace mlir {
 namespace tutorial {
 namespace poly {
 
-// Scaffolding, not from the article: the article registers the
-// DifferenceOfSquares pattern inside SubOp::getCanonicalizationPatterns, so
-// it runs as part of --canonicalize. This standalone pass exposes the same
-// pattern under its own flag, so it can be run without editing the Poly
-// dialect in lib/.
+// Scaffolding specific to this frozen copy: the pattern was originally
+// registered inside SubOp::getCanonicalizationPatterns, so it ran as part of
+// --canonicalize. This standalone pass exposes the same pattern under its
+// own flag, so it can be run without editing the Poly dialect in lib/.
 class DifferenceOfSquaresPass
     : public PassWrapper<DifferenceOfSquaresPass,
                          OperationPass<mlir::func::FuncOp>> {
@@ -22,7 +21,7 @@ private:
   StringRef getArgument() const final { return "difference-of-squares"; }
 
   StringRef getDescription() const final {
-    return "Apply Tutorial 9's C++ DifferenceOfSquares pattern";
+    return "Apply Chapter 9's C++ DifferenceOfSquares pattern";
   }
 };
 

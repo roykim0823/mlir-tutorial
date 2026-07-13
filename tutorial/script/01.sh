@@ -14,13 +14,15 @@ TESTS="../../tests"
 { step "2. The example program (01-mlir-basics-and-running-a-lowering.md)"; } 2>/dev/null
 cat $TESTS/ctlz_simple.mlir
 
-{ step "3. Step"; } 2>/dev/null
+{ step "3. Step: run mlir-opt with no passes"; } 2>/dev/null
 mlir-opt $TESTS/ctlz_simple.mlir
 
 mlir-opt -- $TESTS/ctlz_simple.mlir
 
+# expected to FAIL: the verifier demo (i32 * i64 mismatch)
 mlir-opt -- $TESTS/wrong_type.mlir
 
+{ step "4. Step: apply the lowering"; } 2>/dev/null
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir
 
 set +x # turn off command echoing

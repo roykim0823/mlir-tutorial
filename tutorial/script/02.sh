@@ -11,7 +11,7 @@ step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
 set -x  # turn on command echoing
 TESTS="../../tests"
 
-{ step "3. The example program (02-testing-a-lowering.md)"; } 2>/dev/null
+{ step "3. A FileCheck primer, one directive at a time (02-testing-a-lowering.md)"; } 2>/dev/null
 cat $TESTS/filecheck_directives.mlir
 
 mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=LOOSE
@@ -31,7 +31,7 @@ echo $?
 
 mlir-opt $TESTS/ctlz_simple.mlir | FileCheck $TESTS/ctlz_simple.mlir 
 
-{ step "4. Step"; } 2>/dev/null
+{ step "4. Step: read a real test, and run it by hand"; } 2>/dev/null
 cat $TESTS/ctlz_simple.mlir
 
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir \
@@ -39,7 +39,7 @@ mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir \
 
 mlir-opt $TESTS/ctlz_simple.mlir | FileCheck $TESTS/ctlz_simple.mlir
 
-{ step "5. Step: exhaustive asserions"; } 2>/dev/null
+{ step "5. Step: exhaustive assertions, and generate-test-checks.py"; } 2>/dev/null
 # (input must be ctlz.mlir itself — its CHECK lines were generated from
 #  ctlz.mlir's @main; ctlz_simple.mlir's @main has a different signature)
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz.mlir \
@@ -52,7 +52,7 @@ curl -sLo /tmp/generate-test-checks.py \
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir \
 								 | python3 /tmp/generate-test-checks.py
 
-{ step "8. Bonus step"; } 2>/dev/null
+{ step "8. Bonus step: testing behavior, not syntax, with mlir-runner"; } 2>/dev/null
 mlir-opt $TESTS/ctlz_runner.mlir \
   -pass-pipeline="builtin.module( \
      convert-math-to-funcs{convert-ctlz}, \

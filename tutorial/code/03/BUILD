@@ -1,5 +1,5 @@
-# Frozen code for Tutorial 3 (Writing Our First Pass): the hand-written
-# PassWrapper form of the passes, before the tablegen migration of Tutorial 4.
+# Frozen code for Chapter 3 (Writing Our First Pass): the hand-written
+# PassWrapper form of the passes, before the tablegen migration of Chapter 4.
 # The canonical, current versions live in lib/Transform/{Affine,Arith}.
 
 package(

@@ -29,10 +29,10 @@ func.func @poly_square_eval() -> i32 {
   return %v : i32
 }
 EOF
-# Round-trip it (nothing is computed at this point in the series; the comments
+# Round-trip it (nothing is computed at this point in the book; the comments
 # above are math annotations, not compiler output).
 $TUTORIAL_OPT $SCRATCH/poly_square_eval.mlir
-# Foreshadowing Tutorial 7: --canonicalize folds the mul, producing exactly the
+# Foreshadowing Chapter 7: --canonicalize folds the mul, producing exactly the
 # p^2 coefficients from the comment (dense<[1, 4, 10, 12, 9]>). The eval is NOT
 # folded -- EvalOp has no folder -- so 26244 stays a math annotation.
 $TUTORIAL_OPT $SCRATCH/poly_square_eval.mlir --canonicalize

@@ -1,24 +1,23 @@
-# Tutorial 12: A Global Optimization and Dataflow Analysis
+# Chapter 12: A Global Optimization and Dataflow Analysis
 
-This is a step-by-step companion to the article
-[A Global Optimization and Dataflow Analysis](https://jeremykun.com/2023/11/15/mlir-a-global-optimization-and-dataflow-analysis/).
 Every transformation so far — folds, canonicalizations, lowerings — was
-*local*: look at an op and its neighbors, rewrite, repeat. This finale
-changes register entirely. A second dialect, **`noisy`**, models the
+*local*: look at an op and its neighbors, rewrite, repeat. This chapter,
+the finale of the book's main arc, changes register entirely. A second
+dialect, **`noisy`**, models the
 central constraint of FHE (noise growth), and the compiler's job becomes
 a *placement problem*: insert as few expensive `noisy.reduce_noise` ops
 as possible while keeping every value's noise under budget. Solving it
-takes two tools no previous tutorial needed — a **dataflow analysis**
+takes two tools no previous chapter needed — a **dataflow analysis**
 (MLIR's framework for whole-program facts) and an **integer linear
 program** solved by Google's or-tools. Yes: this one pass is why this
-repo's build downloads half of operations research (Tutorial 2's CMake
+repo's build downloads half of operations research (Chapter 2's CMake
 saga, finally explained).
 
 **What you will learn:**
 
 - The `noisy` dialect's noise model, worked by hand before any code.
 - Op *interfaces* with methods (`InferIntRangeInterface`) — the promised
-  other half of Tutorial 6's traits.
+  other half of Chapter 6's traits.
 - MLIR's dataflow framework: transfer functions, joins, fixed points —
   and reusing upstream's integer-range analysis for a custom purpose.
 - How to encode "where should I insert ops?" as an ILP: decision
@@ -26,9 +25,9 @@ saga, finally explained).
   analysis.
 - Verified end-to-end runs where the solver beats any greedy strategy.
 
-**Prerequisites:** [Tutorial 5](05-defining-a-new-dialect.md) (dialect
+**Prerequisites:** [Chapter 5](05-defining-a-new-dialect.md) (dialect
 machinery — `noisy` reuses all of it) and
-[Tutorial 6](06-using-traits.md) (traits/interfaces). Build note: this is
+[Chapter 6](06-using-traits.md) (traits/interfaces). Build note: this is
 the pass that needs **or-tools**, so `tutorial-opt` must be built with it
 (both build systems handle this automatically — at the cost of the long
 first build).
@@ -77,13 +76,13 @@ budget-eater (true in real FHE too), and programs need `reduce_noise` —
 but each one is expensive, so we want the *minimum* number, placed
 *optimally*.
 
-Why is this not a Tutorial-9-style local rewrite? Two reasons. First,
+Why is this not a Chapter-9-style local rewrite? Two reasons. First,
 whether an op's noise is dangerous depends on *everything upstream* of
 it — a per-op pattern can't see that. Second, the best placement depends
 on everything *downstream*: the star example below has two branches that
 each individually exceed budget, where one `reduce_noise` placed *before
 the split* fixes both — a fact no per-branch (greedy) strategy can
-discover. (A design aside from the article worth absorbing: you might
+discover. (A design aside worth absorbing: you might
 propose encoding noise in the *type* — `!noisy.i32<24>` — and letting
 verifiers do the work. But then inserting one op would change the types
 of everything downstream, and the IR fights you. Analysis, not types, is
@@ -91,7 +90,7 @@ the right home for this kind of fact.)
 
 ## 2. The dialect, and interfaces with methods
 
-`noisy`'s tablegen is Tutorial 5 material at this point — a dialect
+`noisy`'s tablegen is Chapter 5 material at this point — a dialect
 shell, a parameterless type, ops with constraints (`AnyIntOfWidths<[1,
 2, 3, 4, 5]>` for the message type is the only new constraint trick).
 One line is genuinely new:
@@ -105,7 +104,7 @@ class Noisy_BinOp<string mnemonic> : Op<Noisy_Dialect, mnemonic, [
 ]> {
 ```
 
-Tutorial 6 defined a trait as "an interface with no methods" and
+Chapter 6 defined a trait as "an interface with no methods" and
 promised the with-methods half later. Here it is:
 `DeclareOpInterfaceMethods<InferIntRangeInterface, ...>` attaches an
 **op interface** — a named set of function signatures — and asks tablegen
@@ -113,7 +112,11 @@ to declare the method on the op class for you to implement. Any pass can
 then ask an unknown op, dynamically: "do you implement
 `InferIntRangeInterface`? Then tell me your result's range." Interfaces
 are how upstream analyses work with ops they've never heard of — the
-same open-extensibility trick as traits, but carrying code.
+same open-extensibility trick as traits, but carrying code. (Upstream's
+own customer is the
+[`int-range-optimizations`](https://mlir.llvm.org/docs/Passes/#-int-range-optimizations)
+pass, which uses the inferred ranges to replace `arith.cmpi` ops with
+constants when the ranges decide the comparison.)
 
 The implementations are the noise semantics of section 1 as code. Every
 `inferResultRanges` has the same contract: it receives the
@@ -178,7 +181,10 @@ noise** — we've hijacked a stock analysis as a noise meter.
 ## 3. Dataflow analysis: whole-program facts
 
 Given those per-op rules, something must *propagate* them through the
-program. That is a classic **dataflow analysis** (Kildall's method):
+program. That is a classic **dataflow analysis** (Kildall's method — one
+part of Frances Allen's Turing Award;
+[this clang-docs article](https://clang.llvm.org/docs/DataFlowAnalysisIntro.html)
+is a good standalone introduction):
 
 - each SSA value carries a lattice element (here: its possible noise
   range, from "uninitialized" up to `[0, ∞)`);
@@ -188,7 +194,11 @@ program. That is a classic **dataflow analysis** (Kildall's method):
   associative, commutative, idempotent so the iteration converges);
 - iterate until a **fixed point** — no fact changes.
 
-MLIR packages this as the `DataFlowSolver`. The validation half of the
+MLIR packages this as the `DataFlowSolver`
+([official docs on dataflow analysis](https://mlir.llvm.org/docs/Tutorials/DataFlowAnalysis/);
+the current solver framework was introduced in
+[this RFC](https://discourse.llvm.org/t/rfc-a-dataflow-analysis-framework/63340)).
+The validation half of the
 pass ([`ReduceNoiseOptimizer.cpp`](../lib/Transform/Noisy/ReduceNoiseOptimizer.cpp))
 shows the whole API:
 
@@ -207,10 +217,11 @@ solver's lattice, and errors if `range.umax() > MAX_NOISE` — the
 "noise exceeds the allowable maximum" diagnostic. Two field notes,
 both preserved as comments in the repo: the `DeadCodeAnalysis` line is
 **load-bearing** — the range analysis silently computes nothing without
-it (an hour of anyone's life, donated by the author so you keep yours);
-and the author also had to patch upstream LLVM to make
+it (an hour of anyone's life, donated by this codebase's author so you
+keep yours); and the author also had to patch upstream LLVM to make
 `IntegerRangeAnalysis` reusable outside its own pass at all — sometimes
-the tutorial writes the infrastructure.
+the book writes the infrastructure. (That fix has long since landed —
+you inherit it silently.)
 
 ## 4. The optimization, as an integer linear program
 
@@ -240,7 +251,7 @@ ops go?" can be written as constraints over variables
 - **Add/sub** need max(lhs, rhs)+1, encoded with an auxiliary variable
   `Z_v ≥ 1 + lhs`, `Z_v ≥ 1 + rhs`, given a *small penalty* in the
   objective so the solver keeps it at the max rather than inflating it.
-  (The article is careful here in a way worth copying: whenever you use
+  (A carefulness worth copying: whenever you use
   the penalty trick you must argue the solver can't profitably inflate
   Z — here, larger Z only tightens downstream constraints, forcing
   *more* insertions, so minimization keeps it honest.)
@@ -267,9 +278,17 @@ class ReduceNoiseAnalysis {
 
 Note the constructor-does-everything pattern: constructing the analysis
 builds *and solves* the ILP on the spot, and `shouldInsertReduceNoise`
-is afterwards a mere lookup in the stored solution map. The article
-grumbles about this pattern — analyses can't easily signal failure from
-a constructor, hence the pass's `FIXME` about infeasible models.
+is afterwards a mere lookup in the stored solution map. This codebase's
+author grumbles about this pattern — analyses can't easily signal failure
+from a constructor, hence the pass's `FIXME` about infeasible models (a
+second standing `FIXME`: the analysis assumes no `reduce_noise` ops
+pre-exist in the input). This
+construct-then-query shape is all MLIR's analysis infrastructure asks
+for: the pass-management docs cover
+[storing and caching a constructed analysis within a pass](https://mlir.llvm.org/docs/PassManagement/#analysis-management)
+and
+[when an analysis must be recomputed](https://mlir.llvm.org/docs/PassManagement/#preserving-analyses)
+(by default: always, between passes).
 
 And the pass itself is almost anticlimactic — solve, walk, insert:
 
@@ -336,7 +355,7 @@ own:
 One `reduce_noise`, placed *before the fork*, rescues both branches —
 the globally-optimal move that no local pattern and no per-branch greedy
 pass can see, because its justification lives in two different futures.
-This is the whole tutorial in one line of IR. (The test file's fourth
+This is the whole chapter in one line of IR. (The test file's fourth
 function is the control experiment: same shape, but the branches
 *remultiply* at the end, and the solver correctly pays for **two**
 cleanups, one per branch — the CHECK-COUNT lines in the test pin down
@@ -349,33 +368,24 @@ bazel test //tests:noisy_reduce_noise.mlir.test //tests:noisy_syntax.mlir.test  
 llvm-lit -sv build-ninja/tests --filter noisy                                   # CMake
 ```
 
-## Differences from the original article
-
-- The article develops validation as a separate exploratory pass before
-  building the optimizer; the repo folds it into `ReduceNoiseOptimizer`
-  as the post-solve self-check.
-- The article's debug walkthrough (`--debug --debug-only=int-range-analysis`)
-  requires an assertions-enabled LLVM build; release-built toolchains
-  (e.g. Homebrew's) won't print the per-op inference log.
-- The upstream `IntegerRangeAnalysis` fix the author contributed
-  (llvm/llvm-project#72007) has long since landed — you inherit it
-  silently.
-- Honest repo FIXMEs still stand: infeasible solver models aren't
-  signalled cleanly, and the analysis assumes no `reduce_noise` ops
-  pre-exist in the input.
+A debugging aid worth knowing: `--debug --debug-only=int-range-analysis`
+prints the analysis's per-op inference log — but it requires an
+assertions-enabled LLVM build; release-built toolchains (e.g. Homebrew's)
+won't print anything.
 
 ## Where to go next
 
-This completes the series' main arc — from "what is a dialect" to a
+This completes the book's main arc — from "what is a dialect" to a
 compiler that does operations-research-grade optimization on a domain
 model. One epilogue remains:
-[Tutorial 13: Defining Patterns with PDLL](13-defining-patterns-with-pdll.md),
-a third pattern-authoring language (after Tutorial 3's C++ and Tutorial
+[Chapter 13: Defining Patterns with PDLL](13-defining-patterns-with-pdll.md),
+a third pattern-authoring language (after Chapter 3's C++ and Chapter
 9's DRR), already visible in this repo as `--mul-to-add-pdll` and
 `lib/Transform/Arith/MulToAdd.pdll`. And if the FHE thread hooked you:
 everything here is a toy of [HEIR](https://heir.dev/), the real compiler
-this series was warming up for — where `poly` became upstream MLIR's
-`polynomial` dialect (Tutorial 5's fun fact) and noise management is a
+this book was warming up for — where `poly` grew into a full
+`polynomial` dialect (upstreamed to MLIR for a time, now maintained in
+HEIR — Chapter 5's fun fact) and noise management is a
 research area, not five ops.
 
 **Exercises**
@@ -397,7 +407,7 @@ research area, not five ops.
    12 (a repo comment calls this "a bit sloppy"). Construct a program
    where that assumption is wrong (hint: a function called with an
    already-noisy value) and explain what the fix would require (whole-
-   program vs per-function analysis — the same tension as Tutorial 10's
+   program vs per-function analysis — the same tension as Chapter 10's
    function-boundary handling).
 5. Estimate the cost of doing this "properly by hand": sketch what a
    greedy noise-tracking pass (insert when the *next* op would

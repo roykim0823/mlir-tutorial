@@ -1,5 +1,5 @@
-// Tutorial 3's driver, pre-tablegen (the "original article" form shown in
-// tutorial 3 section 3): explicit PassRegistration lines, no generated
+// Chapter 3's driver, pre-tablegen (the original hand-written form shown in
+// chapter 3 section 3): explicit PassRegistration lines, no generated
 // register*Passes() functions. See README.md in this directory.
 #include "tutorial/code/03/AffineFullUnroll.h"
 #include "tutorial/code/03/AffineFullUnrollPatternRewrite.h"

@@ -1,9 +1,7 @@
-# Tutorial 9: Canonicalizers and Declarative Rewrite Patterns
+# Chapter 9: Canonicalizers and Declarative Rewrite Patterns
 
-This is a step-by-step companion to the article
-[Canonicalizers and Declarative Rewrite Patterns](https://jeremykun.com/2023/09/20/mlir-canonicalizers-and-declarative-rewrite-patterns/).
-[Tutorial 7](07-folders-and-constant-propagation.md) gave `poly` folders —
-single-op, constants-only simplifications. This tutorial adds the general
+[Chapter 7](07-folders-and-constant-propagation.md) gave `poly` folders —
+single-op, constants-only simplifications. This chapter adds the general
 case: **canonicalization patterns**, rewrites spanning several ops, hooked
 into the same `--canonicalize` pass. Along the way we learn a second
 authoring language for rewrite patterns — **DRR** (declarative rewrite
@@ -14,7 +12,7 @@ in the `poly` codebase: `let hasCanonicalizer = 1` and
 The running examples are two genuinely mathematical rewrites:
 
 - **Difference of squares**: x² − y² = (x + y)(x − y) — trades two
-  (expensive) multiplications for one, plus cheap additions. Tutorial 3's
+  (expensive) multiplications for one, plus cheap additions. Chapter 3's
   `MulToAdd` economics, at the polynomial level.
 - **Conjugate through evaluation**: for polynomials with real
   coefficients, f(z̄) = f(z)̄ — evaluating at a conjugate equals
@@ -25,22 +23,22 @@ The running examples are two genuinely mathematical rewrites:
 
 - What canonicalization is, and how it differs from folding.
 - `hasCanonicalizer` / `getCanonicalizationPatterns` — attaching rewrite
-  patterns (Tutorial 3's kind!) to an op's canonical form.
-- The same pattern written twice: C++ (the article's version) and DRR
+  patterns (Chapter 3's kind!) to an op's canonical form.
+- The same pattern written twice: C++ (the original version) and DRR
   (the repo's version) — and how to read the tablegen pattern language
   (`Pat`, `Pattern`, bound variables, constraints, `CPred`).
 - How `-gen-rewriters` turns DRR into the C++ you would have written.
 - When to choose folding vs. canonicalization vs. a standalone pass.
 
-**Prerequisites:** [Tutorial 7](07-folders-and-constant-propagation.md)
-(folding, `--canonicalize`) and [Tutorial 3](03-writing-our-first-pass.md)
+**Prerequisites:** [Chapter 7](07-folders-and-constant-propagation.md)
+(folding, `--canonicalize`) and [Chapter 3](03-writing-our-first-pass.md)
 (`OpRewritePattern`, `matchAndRewrite`). Same build setup
 (`$TUTORIAL_OPT`).
 
 ---
 
-> **Heads-up before you read any code:** this tutorial presents the
-> canonicalization pattern twice — section 3 in C++ (the article's
+> **Heads-up before you read any code:** this chapter presents the
+> canonicalization pattern twice — section 3 in C++ (the original
 > version, which is **not what `lib/` contains**; it is preserved,
 > buildable, in [`tutorial/code/09/`](code/09/)), and section 4 in DRR,
 > which *is* the main tree's version
@@ -48,7 +46,7 @@ The running examples are two genuinely mathematical rewrites:
 
 ## 1. Concepts: canonicalization vs. folding
 
-Tutorial 7 drew folding's box deliberately small: one op, no new ops,
+Chapter 7 drew folding's box deliberately small: one op, no new ops,
 return an attribute or existing value. Plenty of valuable rewrites don't
 fit:
 
@@ -60,11 +58,11 @@ These are **DAG-to-DAG rewrites** — replacing one connected piece of the
 IR graph with another — and MLIR's home for them is the
 **canonicalization** hook: patterns an op contributes to the
 `--canonicalize` pass. That pass, which you've been using since
-Tutorial 7, is really three things braided together, run by the greedy
-driver (Tutorial 3 §7) until a fixed point:
+Chapter 7, is really three things braided together, run by the greedy
+driver (Chapter 3 §7) until a fixed point:
 
 1. every op's **folders**,
-2. every op's **canonicalization patterns** (this tutorial),
+2. every op's **canonicalization patterns** (this chapter),
 3. generic cleanups (dead-op removal — the reason canonicalize deletes
    what sccp leaves behind).
 
@@ -72,25 +70,28 @@ Why "canonical"? The goal isn't only optimization: it's putting IR into a
 *normal form* so that later passes (and folders, and CSE) see one shape
 instead of five equivalent ones. The conjugation rewrite is pure
 normal-form play: `conj` ops migrate to a consistent position, so
-downstream code needs one pattern, not two. (The article notes, fairly,
-that in practice canonicalize accretes minor optimizations too and
-becomes "a heavyweight and powerful pass" — the boundary between
-"canonical form" and "optimization" is community convention.)
+downstream code needs one pattern, not two. (In practice — as this
+codebase's author notes, fairly — canonicalize accretes minor
+optimizations too and becomes "a heavyweight and powerful pass"; the
+boundary between "canonical form" and "optimization" is community
+convention.)
 
 Mechanically you already know everything involved: canonicalization
-patterns *are* Tutorial 3's `RewritePattern`s. The only new machinery is
+patterns *are* Chapter 3's `RewritePattern`s. The only new machinery is
 how an op volunteers them.
 
 ## 2. Attaching patterns to an op
 
-In `PolyOps.td` (Tutorial 5), the binops and `eval` declare:
+In `PolyOps.td` (Chapter 5), the binops and `eval` declare:
 
 ***lib/Dialect/Poly/PolyOps.td*** (excerpt)
 ```tablegen
 let hasCanonicalizer = 1;
 ```
 
-which generates one static-method declaration on the op class:
+which generates one static-method declaration on the op class (the
+official docs for canonicalizing this way are
+[here](https://mlir.llvm.org/docs/Canonicalization/#canonicalizing-with-rewritepatterns)):
 
 ```cpp
 static void getCanonicalizationPatterns(::mlir::RewritePatternSet &results,
@@ -120,11 +121,11 @@ attached to its *root* op — the op at the "top" of the matched DAG, the
 one being replaced. Difference-of-squares roots at the `sub`; the
 conjugation rewrite roots at the `eval`.
 
-## 3. The pattern in C++ (the article's version)
+## 3. The pattern in C++ (the original version)
 
-The article first writes `DifferenceOfSquares` exactly the way Tutorial 3
+`DifferenceOfSquares` was first written exactly the way Chapter 3
 taught: an ordinary `OpRewritePattern<SubOp>` — rooted at the `sub`, as
-section 2 chose — following Tutorial 3 §8's two-phase discipline, a match
+section 2 chose — following Chapter 3 §8's two-phase discipline, a match
 phase that only inspects and bails out, then a rewrite phase that builds
 the replacement. It's worth reading in full because the DRR version must
 be understood *as shorthand for this*:
@@ -162,15 +163,15 @@ struct DifferenceOfSquares : public OpRewritePattern<SubOp> {
     SubOp newSub = rewriter.create<SubOp>(op.getLoc(), x, y);
     MulOp newMul = rewriter.create<MulOp>(op.getLoc(), newAdd, newSub);
 
-    // The article wrote `replaceOp(op, {newMul})`; the braced form is
-    // ambiguous (ValueRange vs. Operation*) in current MLIR.
+    // The original version wrote `replaceOp(op, {newMul})`; the braced form
+    // is ambiguous (ValueRange vs. Operation*) in current MLIR.
     rewriter.replaceOp(op, newMul);
     return success();
   }
 };
 ```
 
-All Tutorial 3 vocabulary, and one short linear path — read it in
+All Chapter 3 vocabulary, and one short linear path — read it in
 execution order. The match phase is three bailouts, each returning
 `failure()` before anything is mutated. The first — the **`hasOneUse`
 guard** — is the one genuinely new, *semantic* check: if `x²` has
@@ -205,7 +206,8 @@ collects them. Rewrite the root, let the driver sweep.
 
 Look closely at section 3: about 30 lines, of which perhaps 6 carry the
 *idea* — "match sub(mul(x,x), mul(y,y)), emit mul(add(x,y), sub(x,y))".
-The rest is casts, null checks, and plumbing. **DRR** (Declarative
+The rest is casts, null checks, and plumbing.
+**[DRR](https://mlir.llvm.org/docs/DeclarativeRewrites/)** (Declarative
 Rewrite Rules) is a tablegen language for exactly this shape of pattern:
 say the source DAG, say the target DAG, let a generator write the
 plumbing. The repo's current implementation:
@@ -244,9 +246,9 @@ Reading the language:
   built-in DRR way to say "has one use", so `HasOneUse` *injects C++*
   via `CPred`: `$_self` expands to the constrained value, and the string
   is pasted into the generated match code. DRR's escape hatch is
-  literally "write the C++ inline" — the author's candid note is that
-  fluency in *both* styles is required, since real patterns keep one foot
-  in C++.
+  literally "write the C++ inline" — a candid note from this codebase's
+  author: fluency in *both* styles is required, since real patterns keep
+  one foot in C++.
 
 The conjugation rewrite is the simple form — one op in, one op out,
 `Pat`:
@@ -263,15 +265,18 @@ Match "eval of f at conj(z)", emit "conj of eval of f at z" — the
 math identity f(z̄) = f(z)̄, as two lines of tree surgery. (`ConjOp` comes
 from including `mlir/Dialect/Complex/IR/ComplexOps.td` — DRR patterns mix
 dialects freely. `$fastmath` binds `conj`'s fastmath *attribute* and
-carries it to the new op: attributes bind just like operands.)
+carries it to the new op: attributes bind just like operands. The
+`fastmath` attribute is a relatively recent upstream addition to
+`ConjOp` — an older two-argument version of this pattern, without
+`$fastmath`, no longer compiles.)
 
 ### From DRR to C++
 
 The build runs the `-gen-rewriters` tablegen backend over
 `PolyPatterns.td` (the `canonicalize_inc_gen` target in the
-[`BUILD`](../lib/Dialect/Poly/BUILD) file, Tutorial 5 §6's fourth
+[`BUILD`](../lib/Dialect/Poly/BUILD) file, Chapter 5 §6's fourth
 `gentbl_cc_library`), producing `PolyCanonicalize.cpp.inc`, which
-`PolyOps.cpp` includes. Run it yourself and skim (Tutorial 4's habit):
+`PolyOps.cpp` includes. Run it yourself and skim (Chapter 4's habit):
 
 ```bash
 mlir-tblgen --gen-rewriters -I /opt/homebrew/opt/llvm@20/include \
@@ -293,7 +298,7 @@ struct DifferenceOfSquares : public ::mlir::RewritePattern {
 — plus a convenience `populateWithGenerated(RewritePatternSet&)` that
 registers everything at once (this repo registers by name instead, in
 section 2's hooks, since different patterns belong to different ops). As
-with every tablegen backend since Tutorial 4: it's a see-through
+with every tablegen backend since Chapter 4: it's a see-through
 generator, and when a DRR pattern misbehaves, you debug by reading this
 file.
 
@@ -354,9 +359,9 @@ becomes
 ```
 
 The conjugation lifted through the evaluation — and this is why
-Tutorial 8's verifier admits complex points at all.
+Chapter 8's verifier admits complex points at all.
 
-**And the first function** is Tutorial 7's fold demo (constants all the
+**And the first function** is Chapter 7's fold demo (constants all the
 way down to a `poly.constant dense<[2, 4, 6]>`) — a reminder that
 `--canonicalize` is folders *and* patterns *and* cleanup in one loop.
 
@@ -369,48 +374,38 @@ llvm-lit -sv build-ninja/tests --filter poly_canonicalize   # CMake
 
 ## 6. Choosing your tool, final table
 
-Three tutorials of IR-simplification machinery, one decision rule:
+Three chapters of IR-simplification machinery, one decision rule:
 
 | Mechanism | Scope | Creates ops? | Runs |
 |---|---|---|---|
-| **Folder** (Tut. 7) | one op | never (attribute/value out) | constantly: greedy driver, canonicalize, sccp, after every `create` in some drivers |
+| **Folder** (Ch. 7) | one op | never (attribute/value out) | constantly: greedy driver, canonicalize, sccp, after every `create` in some drivers |
 | **Canonicalization pattern** (here) | a DAG | freely | inside `--canonicalize` |
-| **Standalone pass** (Tut. 3) | whole module/function | freely | when *you* schedule it |
+| **Standalone pass** (Ch. 3) | whole module/function | freely | when *you* schedule it |
 
 Prefer the smallest box that fits: folders if it's one op and constants;
 canonicalization if it's a local identity that should *always* hold
 (cheap, universally beneficial, direction-agreed); a dedicated pass if
 it's a strategy — profitable only sometimes, needing analysis or
-configuration (Tutorial 3's full-unroll is a pass, not a
+configuration (Chapter 3's full-unroll is a pass, not a
 canonicalization, because unrolling everything is not always an
 improvement).
 
-## Differences from the original article
-
-- **`DifferenceOfSquares` migrated from C++ to DRR.** The article writes
-  it as section 3's C++ class and leaves it that way; the repo's current
-  code ships the DRR version of section 4, registered under the same
-  name. (Both are shown above deliberately — the article's C++ is the
-  best possible reading guide to the repo's tablegen.)
-- **`ConjOp` grew a `fastmath` attribute** upstream, so the repo's
-  `LiftConjThroughEval` binds and forwards `$fastmath`; the article's
-  two-argument version no longer compiles.
-- The article mentions PDLL as a third pattern language it hasn't
-  explored; the repo has since acquired a PDLL example
-  (`--mul-to-add-pdll`, `lib/Transform/Arith/MulToAdd.pdll`) — that's the
-  final article/tutorial of the series.
+There is also a *third* authoring language for patterns beyond C++ and
+DRR: [PDLL](https://mlir.llvm.org/docs/PDLL/), which gets its own chapter
+at the end of the book (Chapter 13, via the repo's `--mul-to-add-pdll`
+pass and `lib/Transform/Arith/MulToAdd.pdll`).
 
 ## Where to go next
 
 The `poly` dialect is now feature-complete as a *high-level* IR: syntax,
 semantics, verification, folding, canonicalization. What it cannot yet do
-is *run*. The remaining arc is downhill — Tutorial 1's lowering
+is *run*. The remaining arc is downhill — Chapter 1's lowering
 staircase, but for our own dialect: convert `poly` ops into `arith` and
 `tensor` ops
-([Tutorial 10: Dialect Conversion](10-dialect-conversion.md)),
-then to LLVM and an actual executable (Tutorial 11). The
+([Chapter 10: Dialect Conversion](10-dialect-conversion.md)),
+then to LLVM and an actual executable (Chapter 11). The
 `lib/Conversion/PolyToStandard/` directory has been waiting since
-Tutorial 3's project-layout tour.
+Chapter 3's project-layout tour.
 
 **Exercises**
 
@@ -428,17 +423,17 @@ Tutorial 3's project-layout tour.
 3. Write x² − y² with `x = y` (both operands the same value) and
    canonicalize. The pattern fires and leaves `poly.sub %x, %x` in the
    output (verified) — semantically zero, but nothing simplifies it,
-   because Tutorial 7's `SubOp::fold` only handles *constant* operands.
+   because Chapter 7's `SubOp::fold` only handles *constant* operands.
    Sketch the fold (or DRR pattern) that would finish the job: `x − x →`
    what, exactly? (Careful: the answer is a *constant zero polynomial* —
    which existing op materializes it, and what attribute does its folder
    need to return?)
-4. In Tutorial 3, `PowerOfTwoExpand` and `PeelFromMul` were *pass*
+4. In Chapter 3, `PowerOfTwoExpand` and `PeelFromMul` were *pass*
    patterns, not canonicalizations. Given section 6's table, argue both
    sides: what would go wrong (or right) if `mul-to-add` rewrites were
    attached to `arith.muli`'s canonicalizer?
 5. DRR can't express "has one use" natively, but it *can* express
-   attribute equality and type constraints. Skim the DRR docs
-   (mlir.llvm.org/docs/DeclarativeRewrites/) and find one feature not
+   attribute equality and type constraints. Skim the
+   [DRR docs](https://mlir.llvm.org/docs/DeclarativeRewrites/) and find one feature not
    used in `PolyPatterns.td` (e.g. `NativeCodeCall`) — sketch a use for
    it in `poly`.

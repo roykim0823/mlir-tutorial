@@ -1,19 +1,17 @@
-# Tutorial 7: Folders and Constant Propagation
+# Chapter 7: Folders and Constant Propagation
 
-This is a step-by-step companion to the article
-[Folders and Constant Propagation](https://jeremykun.com/2023/09/11/mlir-folders/).
-[Tutorial 6](06-using-traits.md) ended on a cliffhanger: `tests/sccp.mlir`
+[Chapter 6](06-using-traits.md) ended on a cliffhanger: `tests/sccp.mlir`
 wants to replace `poly.mul` of *known* polynomials with the precomputed
 product, and traits alone can't do that — someone has to teach MLIR to
 actually *multiply polynomials at compile time*. That someone is the
-**folder**, the `fold` method behind `let hasFolder = 1`. This tutorial
-also pays off the last two IOUs from Tutorial 5: the `poly.constant` op
+**folder**, the `fold` method behind `let hasFolder = 1`. This chapter
+also pays off the last two IOUs from Chapter 5: the `poly.constant` op
 and the dialect's `hasConstantMaterializer`.
 
 **What you will learn:**
 
 - What folding is, and its precise, deliberately limited contract.
-- The three consumers of folders: the greedy rewrite driver (Tutorial 3's
+- The three consumers of folders: the greedy rewrite driver (Chapter 3's
   `applyPatternsAndFoldGreedily`), `--canonicalize`, and `--sccp` — and how
   the last two differ.
 - Why constant propagation needs a *constant op* (`ConstantLike`,
@@ -23,7 +21,7 @@ and the dialect's `hasConstantMaterializer`.
 - The cyclic polynomial multiplication fold, verified down to its
   wraparound arithmetic.
 
-**Prerequisites:** [Tutorial 6](06-using-traits.md). Same build setup
+**Prerequisites:** [Chapter 6](06-using-traits.md). Same build setup
 (`$TUTORIAL_OPT`).
 
 ---
@@ -41,15 +39,15 @@ a fold may:
 - and may **not** create new ops, delete other ops, or look around the
   program.
 
-Compare Tutorial 3's rewrite patterns, which may do all of those things.
+Compare Chapter 3's rewrite patterns, which may do all of those things.
 The restriction is the point: because folds are so local and safe, MLIR
 can invoke them *constantly* — after creating ops in a rewrite, inside the
 greedy driver (that's the "AndFold" in `applyPatternsAndFoldGreedily`, and
-the reason Tutorial 3's exercise 2 saw `1*x` vanish before any pattern
+the reason Chapter 3's exercise 2 saw `1*x` vanish before any pattern
 ran), and inside dedicated passes:
 
 - **`--canonicalize`** runs folds (plus canonicalization patterns,
-  Tutorial 9's subject) greedily and deletes dead code. It is *local*: it
+  Chapter 9's subject) greedily and deletes dead code. It is *local*: it
   cannot reason across control-flow boundaries.
 - **`--sccp`** — *sparse conditional constant propagation* — is the global
   consumer: it runs a dataflow analysis that tracks "is this value known
@@ -109,7 +107,7 @@ happens to the `poly` ops. Three ingredients are missing.
 When sccp discovers `%2` is "the polynomial with coefficients
 `[1, 4, 10, 12, 9]`", it must put that knowledge back into the IR as an
 op. `arith` has `arith.constant` for this; `poly` needs its own — this is
-`poly.constant` from `PolyOps.td`, whose `let`s we skipped in Tutorial 5:
+`poly.constant` from `PolyOps.td`, whose `let`s we skipped in Chapter 5:
 
 ***lib/Dialect/Poly/PolyOps.td***
 ```tablegen
@@ -126,8 +124,8 @@ Two new things:
 
 - **An attribute argument.** Unlike every previous op, the "input" here is
   not an SSA value — `ins AnyIntElementsAttr:$coefficients` declares a
-  compile-time *attribute* operand (Tutorial 1 §3's generic form showed
-  attributes as the `<{...}>` dictionary; Tutorial 3 built one with
+  compile-time *attribute* operand (Chapter 1 §3's generic form showed
+  attributes as the `<{...}>` dictionary; Chapter 3 built one with
   `rewriter.getIntegerAttr`). `AnyIntElementsAttr` is an attribute
   *constraint*: any dense-elements attribute with integer elements, of any
   bit width. That buys the flexible syntax seen in `poly_syntax.mlir`:
@@ -139,9 +137,16 @@ Two new things:
   %13 = poly.constant dense<4> : tensor<100xi32>       : !poly.poly<10>
   ```
 
+  (A small `assemblyFormat` detail worth noticing here:
+  `qualified(type($output))` makes the result type print in full —
+  `!poly.poly<10>` — where a bare `type($output)` would print only the
+  parameter part, `<10>`.)
+
 - **`ConstantLike`** — a trait marking this op as "a constant" for the
   folding machinery, so the engines know its value without special-casing
-  (and so it can be uniquely rebuilt from an attribute + type).
+  (and so it can be uniquely rebuilt from an attribute + type). The
+  benefits of having a dedicated constant op are explained in the
+  [MLIR documentation on folding](https://mlir.llvm.org/docs/Canonicalization/#canonicalizing-with-the-fold-method).
 
 ## 3. Ingredient 2: fold methods
 
@@ -152,6 +157,9 @@ makes tablegen emit a declaration you must implement:
 OpFoldResult MulOp::fold(MulOp::FoldAdaptor adaptor);
 ```
 
+(The signature would be different if the op had more than one result value
+— see [the folding docs](https://mlir.llvm.org/docs/Canonicalization/#canonicalizing-with-the-fold-method).)
+
 The **`FoldAdaptor`** is a shim with the same accessor names as the op —
 `getLhs()`, `getOperands()` — except each returns an `Attribute`: the
 constant value of that operand *if the engine knows it*, or null if it
@@ -159,7 +167,9 @@ doesn't. Your job: if enough operands are known, compute the result and
 return it; otherwise return `nullptr`, meaning "this fold does not apply"
 (the op stays untouched). The implementations live in
 [`lib/Dialect/Poly/PolyOps.cpp`](../lib/Dialect/Poly/PolyOps.cpp), in
-increasing order of interest:
+increasing order of interest. (That file also contains `EvalOp::verify`
+and `getCanonicalizationPatterns` bodies — Chapters 8 and 9; ignore them
+today.)
 
 ***lib/Dialect/Poly/PolyOps.cpp***
 ```cpp
@@ -198,6 +208,8 @@ the elementwise plumbing: hand it the operand attributes and a lambda on
 **`APInt`** — LLVM's arbitrary-precision integer, which carries its bit
 width and wraps accordingly (our "coefficients mod 2³²" semantics fall out
 of 32-bit `APInt` arithmetic for free). `sub` is the same with `a - b`.
+(The third template parameter, `void`, is a newer-LLVM addition — older
+examples of this helper show only two.)
 
 Multiplication is the real one — naive textbook polynomial multiplication,
 in the ring ℤ[x]/(xᴺ − 1):
@@ -242,7 +254,11 @@ OpFoldResult MulOp::fold(MulOp::FoldAdaptor adaptor) {
 
 Read it in execution order. The null guards up front decline the fold
 when either side isn't a known constant (we'll watch that happen in
-section 5). Past the guards, the code prepares a result vector of
+section 5) — battle scars: an earlier version of this code `cast<>`ed the
+operands directly and crashed whenever one wasn't constant. (Note also the
+free-function `llvm::cast<PolynomialType>(...)` spelling: the
+member-function form `type.cast<PolynomialType>()` was deprecated
+upstream.) Past the guards, the code prepares a result vector of
 `lhs.size() + rhs.size() - 1` coefficients, each zero-initialized as
 `APInt(bitwidth, 0)` — the bit width must match the operands', because
 `APInt`s of different widths don't mix. The double loop is convolution:
@@ -262,7 +278,7 @@ A fold produced the attribute `dense<[1, 4, 10, 12, 9]>` — but an
 attribute is not an op. Something must turn it back into IR, and folds
 themselves are forbidden from creating ops. That is the dialect-level
 **constant materializer** — `let hasConstantMaterializer = 1` in
-`PolyDialect.td` (the last unexplained line from Tutorial 5!), implemented
+`PolyDialect.td` (the last unexplained line from Chapter 5!), implemented
 in [`PolyDialect.cpp`](../lib/Dialect/Poly/PolyDialect.cpp):
 
 ***lib/Dialect/Poly/PolyDialect.cpp***
@@ -280,7 +296,11 @@ The engine hands the dialect an attribute and the type the value must
 have, and the dialect decides which op represents it: the `dyn_cast`
 guard returns `nullptr` for any attribute kind that isn't the
 dense-integer form our folds produce — declining, just as a fold does —
-and otherwise builds a `poly.constant`. The division of labor is now
+and otherwise builds a `poly.constant`. (The `Type` argument matters
+because the same attribute can produce multiple different types, e.g. via
+different interpretations of a hex string or
+[splatting](https://mlir.llvm.org/doxygen/classmlir_1_1SplatElementsAttr.html)
+into result tensors of different dimensions.) The division of labor is now
 complete:
 
 > folders **compute** attributes → the materializer turns attributes into
@@ -290,7 +310,7 @@ complete:
 ## 5. Step: watch it work
 
 The second function of [`tests/sccp.mlir`](../tests/sccp.mlir) is
-Tutorial 6's CSE example, but now we can *compute* it:
+Chapter 6's CSE example, but now we can *compute* it:
 
 ***tests/sccp.mlir***
 ```mlir
@@ -377,7 +397,7 @@ func.func @square() -> !poly.poly<10> {
 
 And there's an independent spot-check that doesn't require trusting
 either the compiler or the table: evaluate both sides at some point, say
-x = 7. p(7) = 1 + 2·7 + 3·49 = 162 (Tutorial 5's `%4`!), so p²(7) must be
+x = 7. p(7) = 1 + 2·7 + 3·49 = 162 (Chapter 5's `%4`!), so p²(7) must be
 162² = 26244; and indeed
 1 + 4·7 + 10·49 + 12·343 + 9·2401 = 26244. A polynomial identity that
 holds at enough points is the identity — evaluating at a random point is
@@ -437,27 +457,9 @@ like "this op is a no-op". Upstream examples abound:
 `complex.create(complex.re(%z), complex.im(%z))` folds to `%z`;
 `a - b + b` folds to `a`. The shape in code is a *match* rather than a
 computation: inspect your operands' defining ops (`getDefiningOp<T>()`,
-Tutorial 3's tool) and return the value that makes you redundant. `poly`
+Chapter 3's tool) and return the value that makes you redundant. `poly`
 has an obvious candidate — `poly.to_tensor(poly.from_tensor(%t))` is just
 `%t` — which is exercise 3.
-
-## Differences from the original article
-
-- **The `mul` fold gained null guards.** The article's listing `cast<>`s
-  the operands directly, which crashes when an operand isn't a known
-  constant; the repo's current code uses `dyn_cast_or_null` +
-  `return nullptr` (that hardened path is exactly what section 5's
-  declined-fold demo exercises). Style also moved from
-  `type.cast<PolynomialType>()` to `llvm::cast<PolynomialType>(type)` —
-  the member-function cast form was deprecated upstream.
-- `constFoldBinaryOp` acquired a third template parameter in newer LLVM
-  (`<IntegerAttr, APInt, void>` in the repo vs. two in the article).
-- The `poly.constant` assembly format uses `qualified(type($output))` now
-  (prints `!poly.poly<10>`; the article-era output printed the bare
-  `<10>`).
-- `PolyOps.cpp` in the repo also contains `EvalOp::verify` and
-  `getCanonicalizationPatterns` bodies — Tutorials 8 and 9; ignore them
-  today.
 
 ## Where to go next
 
@@ -465,8 +467,8 @@ The dialect now optimizes itself arithmetically. But try feeding it
 nonsense — a `poly.eval` whose result type doesn't match its point type,
 say — and the only guards are traits and type constraints. Custom
 *semantic* checks (and that `EvalOp::verify` sitting in `PolyOps.cpp`,
-plus Tutorial 5's mysterious `Has32BitArguments` trait) are
-[Tutorial 8: Verifiers](08-verifiers.md).
+plus Chapter 5's mysterious `Has32BitArguments` trait) are
+[Chapter 8: Verifiers](08-verifiers.md).
 
 **Exercises**
 

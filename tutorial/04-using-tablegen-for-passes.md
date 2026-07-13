@@ -1,36 +1,27 @@
-# Tutorial 4: Using Tablegen for Passes
+# Chapter 4: Using Tablegen for Passes
 
-This is a step-by-step companion to the article
-[Using Tablegen for Passes](https://jeremykun.com/2023/08/10/mlir-using-tablegen-for-passes/).
-[Tutorial 3](03-writing-our-first-pass.md) ended with an IOU: it taught
+[Chapter 3](03-writing-our-first-pass.md) ended with an IOU: it taught
 the hand-written `PassWrapper` form of the passes, while the repo's `lib/`
 holds the *same* passes in a form we only glimpsed — a mysterious
-`impl::AffineFullUnrollBase` base class (section 5's "What the repo has
-now" note) and, in the real `tools/tutorial-opt.cpp` (section 3's first
-listing), a `registerAffinePasses()` registration function that nobody
-ever wrote. This tutorial pays the debt — those are all *generated* by
-a tool called **tablegen**, and here we read the 22 lines that produce
+`impl::AffineFullUnrollBase` base class (Chapter 3 §5's "What the repo
+has now" note) and, in the real `tools/tutorial-opt.cpp` (Chapter 3 §3's
+first listing), a `registerAffinePasses()` registration function that
+nobody ever wrote. This chapter pays the debt — those are all *generated*
+by a tool called **tablegen**, and here we read the 22 lines that produce
 them, run the generator by hand, and read every line it emits.
 
-A word of expectation-setting, because the article gives one: its author
-describes a **love-hate relationship** with tablegen — the hate earned
+A word of expectation-setting: this codebase's author describes a
+**love-hate relationship** with tablegen — the hate earned
 mostly by what happens when something goes wrong (poor diagnostics, thin
 documentation), the love recovered by a change of mindset that section 1
 hands you up front and section 8 stress-tests against real error
 messages. Going in with the right expectations is half of using tablegen
 well.
 
-The article's code changes live in
-[PR #7](https://github.com/j2kun/mlir-tutorial/pull/7), with commits
-arranged to be read in order. That same migration is in this repo's
-history (commit `dc345dc`, "Migrate Affine and Arith passes to
-tablegen"), and Tutorial 3's [`tutorial/code/03/`](code/03/) preserves
-the pre-migration state — so the before and after can be laid side by
-side, which is exactly what section 5 does.
-
-Unlike earlier tutorials, this one requires almost no un-learning between
-the article and the repo: the repo *is* the result of the article's
-migration, so the files we read are the article's end state.
+Chapter 3's [`tutorial/code/03/`](code/03/) preserves the pre-migration
+state, so the before and after can be laid side by side, which is exactly
+what section 5 does. The `lib/` files we read in this chapter are that
+migration's end state.
 
 **What you will learn:**
 
@@ -43,11 +34,11 @@ migration, so the files we read are the article's end state.
 - How to read the generated `Passes.h.inc`: the `GEN_PASS_DECL`,
   `GEN_PASS_DEF`, and `GEN_PASS_REGISTRATION` sections, and the
   `#define`/`#include` idiom that consumes them.
-- What the migration deleted from Tutorial 3's hand-written pass, and what
+- What the migration deleted from Chapter 3's hand-written pass, and what
   tablegen offers beyond it (doc generation, pass options).
 - What tablegen's failure modes look like — with real error messages.
 
-**Prerequisites:** [Tutorial 3](03-writing-our-first-pass.md). No new build
+**Prerequisites:** [Chapter 3](03-writing-our-first-pass.md). No new build
 requirements: everything here can be verified with `mlir-tblgen` alone,
 which ships with any MLIR build (`bazel-bin` after building any tablegen
 target, `externals/llvm-project/build/bin/mlir-tblgen`, or an installed
@@ -58,7 +49,7 @@ LLVM's `bin/`).
 ## 1. Concepts: what tablegen is
 
 Nobody writing MLIR passes hand-implements the pass interface the way
-Tutorial 3 §4 showed. They write a few lines in a **tablegen** file and let
+Chapter 3 §4 showed. They write a few lines in a **tablegen** file and let
 a generator produce the boilerplate, keeping only `runOnOperation` (and
 whatever else is genuinely custom) in C++.
 
@@ -69,13 +60,13 @@ A `.td` file declares records with typed fields; a backend of the
 `mlir-tblgen` tool walks those records and prints C++ code (or markdown, or
 anything else a backend chooses). It is used everywhere in the LLVM
 universe — instruction definitions for CPU backends, clang diagnostics —
-and MLIR leans on it harder than anyone: passes (this tutorial), dialects,
-ops, types, and rewrite patterns (Tutorials 5+) are all declared in
+and MLIR leans on it harder than anyone: passes (this chapter), dialects,
+ops, types, and rewrite patterns (Chapters 5+) are all declared in
 tablegen (MLIR's specialized flavor for ops has its own manual, the
 [Operation Definition Specification](https://mlir.llvm.org/docs/DefiningDialects/Operations/)
-— Tutorial 5's territory).
+— Chapter 5's territory).
 
-One mindset note before we start, straight from the article's battle scars:
+One mindset note before we start, straight from the author's battle scars:
 tablegen is **not an abstraction layer**. You cannot use it well while
 ignoring what it generates — when something goes wrong, the errors surface
 in the *generated* C++, and the documentation for "what fields can I set?"
@@ -85,13 +76,13 @@ will). Once you approach it that way, it's genuinely pleasant — the
 generated code is more complete and more correct than what you'd write by
 hand.
 
-The article is also specific about *where* the pain concentrates, and
-it's worth knowing its shape before it happens to you:
+The pain concentrates in specific, predictable places, and it's worth
+knowing their shape before they happen to you:
 
 - Tablegen won't clearly tell you **which functions are left for you to
   implement**, nor spell out their contracts. The documentation is
   incomplete, so the answers live in the upstream sources — and, not
-  rarely, in forum threads.
+  rarely, in [forum threads](https://discourse.llvm.org/c/mlir/31).
 - The practical way to discover what's missing is to **build anyway and
   read the C++ compiler errors** — which, for template-heavy generated
   code, can run to hundreds of lines for one mistake (section 8 shows a
@@ -153,11 +144,11 @@ Field by field:
   (`AffineFullUnrollBase`) and the macro suffix
   (`GEN_PASS_DEF_AFFINEFULLUNROLL`).
 - `Pass<"affine-full-unroll">` — the template argument is the CLI flag,
-  what Tutorial 3's hand-written `getArgument()` returned. `Pass` takes an
+  what Chapter 3's hand-written `getArgument()` returned. `Pass` takes an
   optional second argument naming the anchor op (e.g.
   `Pass<"...", "mlir::func::FuncOp">`); omitted here, so these are generic
   passes anchored on any op — this is exactly where the repo's passes lost
-  the `FuncOp` anchoring that the article's Tutorial-3-era code had.
+  the `FuncOp` anchoring that Chapter 3's hand-written code had.
 - `let summary = ...` — the `--help` one-liner (`getDescription()` in the
   hand-written version — confusingly, tablegen's `summary` maps to the C++
   `getDescription()`).
@@ -198,7 +189,7 @@ what groups the two passes: it names the umbrella registration function
 In the real build you never see this command. With Bazel,
 `gentbl_cc_library` in
 [`lib/Transform/Affine/BUILD`](../lib/Transform/Affine/BUILD) runs it —
-recall the target from Tutorial 3 §10:
+recall the target from Chapter 3 §10:
 
 ***lib/Transform/Affine/BUILD*** (excerpt)
 ```python
@@ -242,8 +233,8 @@ include path.
 Pipe the section-3 command through `less` (or open the generated file from
 your build tree) and you'll find it is *three* files in one, each gated by
 a preprocessor macro so that consumers opt in to exactly the part they
-need. All excerpts below are from the real generated file, lightly
-trimmed.
+need. All excerpts below are from the real generated file (LLVM 20's
+`mlir-tblgen` — other versions differ cosmetically), lightly trimmed.
 
 ### `GEN_PASS_DECL_*` — the public face
 
@@ -282,7 +273,7 @@ include it into. (Get this wrong and you'll enjoy some of section 8.)
 
 ### `GEN_PASS_DEF_*` — the base class
 
-This is the replacement for Tutorial 3's hand-written `PassWrapper` class,
+This is the replacement for Chapter 3's hand-written `PassWrapper` class,
 consumed at the top of
 [`AffineFullUnroll.cpp`](../lib/Transform/Affine/AffineFullUnroll.cpp) with
 `#define GEN_PASS_DEF_AFFINEFULLUNROLL`:
@@ -328,7 +319,7 @@ private:
 } // namespace impl
 ```
 
-Everything from Tutorial 3 §4 is here, written for you. Piece by piece:
+Everything from Chapter 3 §4 is here, written for you. Piece by piece:
 
 - **Each `Passes.td` field maps to one method:** the `Pass<"...">` flag
   became `getArgument()`, `summary` became `getDescription()`, and
@@ -341,17 +332,16 @@ Everything from Tutorial 3 §4 is here, written for you. Piece by piece:
   now merely *generated* instead of hidden.
 - **The base is
   [`::mlir::OperationPass<>`](https://github.com/llvm/llvm-project/blob/main/mlir/include/mlir/Pass/Pass.h)**
-  — empty template argument, the generic anchor from section 2. (The
-  article links `Pass.h` at a pinned commit for the `Pass`/`OperationPass`
-  definitions and `runOnOperation`'s declaration; the file is the
-  authoritative reference for the pass API the generated code plugs
-  into.)
-- **The CRTP from Tutorial 3 is still here** (`template <typename
+  — empty template argument, the generic anchor from section 2. (That
+  header holds the `Pass`/`OperationPass` definitions and
+  `runOnOperation`'s declaration — the authoritative reference for the
+  pass API the generated code plugs into.)
+- **The CRTP from Chapter 3 is still here** (`template <typename
   DerivedT>` + `std::make_unique<DerivedT>()` in the friend factory): the
   base class must construct and clone *your* derived class, which it can
   only name via the template parameter.
 
-What's left for the human is exactly what Tutorial 3 showed:
+What's left for the human is exactly what Chapter 3 showed:
 
 ***lib/Transform/Affine/AffineFullUnroll.cpp*** (excerpt)
 ```cpp
@@ -388,7 +378,7 @@ inline void registerAffinePasses() {
 
 This is consumed by [`Passes.h`](../lib/Transform/Affine/Passes.h) (the
 "whole group" header), and `registerAffinePasses()` is precisely the
-function `tutorial-opt` called in Tutorial 3 §3 — mystery resolved. Each
+function `tutorial-opt` called in Chapter 3 §3 — mystery resolved. Each
 `register*` wraps the same `createAffineFullUnroll()` factory in
 `mlir::registerPass`, which is what makes the `--affine-full-unroll` flag
 exist. (The generated file also contains
@@ -397,7 +387,7 @@ code, kept for temporary backwards compatibility" — generated code has
 legacy baggage too.)
 
 One deliberate omission before moving on: the repo has a *second*
-generated file, `lib/Transform/Arith`'s `Passes.h.inc`, and this tutorial
+generated file, `lib/Transform/Arith`'s `Passes.h.inc`, and this chapter
 won't walk through it — it is the same backend applied to the same kind
 of records, so it has exactly the shape you just read with the names
 swapped (`GEN_PASS_DECL_MULTOADD`, `impl::MulToAddBase`,
@@ -411,10 +401,10 @@ up.
 
 ## 5. The migration, before and after
 
-Put Tutorial 3 §4's hand-written class next to what this repo keeps on
+Put Chapter 3 §4's hand-written class next to what this repo keeps on
 disk, and the trade is clear.
 
-Before (article's original code, ~15 lines *per pass*, plus manual
+Before (the hand-written original, ~15 lines *per pass*, plus manual
 registration in `tutorial-opt.cpp`):
 
 ```cpp
@@ -444,7 +434,7 @@ keeps the complete pre-tablegen code buildable as its own binary
 against `lib/Transform/Affine/` file by file — this section's migration,
 laid out on disk — and confirm the identical behavior yourself.
 
-The checklist from Tutorial 3 §10 ("add a pass = pass files + build entry
+The checklist from Chapter 3 §10 ("add a pass = pass files + build entry
 + registration call") now has a tablegen flavor: add a `def` to
 `Passes.td`, write the struct with `runOnOperation` in a `.cpp`, add the
 `cc_library`/`add_mlir_library` entry — and registration is already
@@ -505,7 +495,7 @@ Two features beyond what this repo's passes use, worth knowing exist:
 - **Pass options and statistics.** A `def` can declare
   `let options = [Option<...>]` to generate CLI-configurable pass
   parameters (remember `convert-math-to-funcs{convert-ctlz}` from
-  Tutorial 2? `convert-ctlz` is such an option), and
+  Chapter 2? `convert-ctlz` is such an option), and
   `let statistics = [...]` for counters reported with
   `--mlir-pass-statistics`. There is also `let constructor = ...` to
   supply a custom factory. `PassBase.td` documents all of these — in the
@@ -513,8 +503,8 @@ Two features beyond what this repo's passes use, worth knowing exist:
 
 ## 8. When tablegen goes wrong
 
-The article's sharpest commentary is about tablegen's failure modes, so
-let's provoke two, for calibration.
+The failure modes are where the intro's love-hate relationship earned its
+"hate", so let's provoke two, for calibration.
 
 Misspell a field in the `.td` (`let summry = ...`):
 
@@ -524,8 +514,8 @@ Passes.td:7:7: error: Value 'summry' unknown!
       ^
 ```
 
-That one is fine — tablegen's own parser has decent errors. The pain the
-article describes lives on the *C++ side* of the boundary. Forget to
+That one is fine — tablegen's own parser has decent errors. The real pain
+lives on the *C++ side* of the boundary. Forget to
 implement `runOnOperation` in your struct and the compiler says (trimmed):
 
 ```
@@ -536,7 +526,8 @@ mlir/Pass/Pass.h:179:16: note: unimplemented pure virtual method
 ```
 
 Modern clang does name the missing method (older toolchains were far less
-helpful, hence the article's grumbling) — but notice *where* the error
+helpful, and earned tablegen much of its grumbling) — but notice *where*
+the error
 points: inside `unique_ptr.h`, reached through the generated friend
 factory, two layers away from anything you wrote. This is the norm for
 tablegen mistakes: wrong namespace around the `#include`, a missing
@@ -545,28 +536,10 @@ errors *in or through generated code*. The survival skill is always the
 same: open the generated `.inc` in your build tree and read what is
 actually there. It's short, it's commented, and it's the ground truth.
 
-## Differences from the original article
-
-Almost none — uniquely in this series, the repo's current state *is* this
-article's end state, so the files above match the article's "after"
-picture. Small notes:
-
-- The generated code shown here comes from LLVM 20's `mlir-tblgen`;
-  the article's 2023 output differs cosmetically (and ours includes the
-  amusing "Old registration code, kept for temporary backwards
-  compatibility" stubs).
-- The article migrates `MulToAdd` in a single commit as a capstone; in the
-  repo that's long done —
-  [`lib/Transform/Arith/Passes.td`](../lib/Transform/Arith/Passes.td)
-  holds its `def`s (including one for a much-later PDLL tutorial).
-- `tutorial-opt` uses the group registration functions; the article shows
-  the transitional state where `PassRegistration<>` lines were replaced
-  one by one.
-
 ## Where to go next
 
 Passes were tablegen's warm-up act. In
-[Tutorial 5: Defining a New Dialect](05-defining-a-new-dialect.md),
+[Chapter 5: Defining a New Dialect](05-defining-a-new-dialect.md),
 tablegen defines an entire **dialect** — the `poly` dialect for polynomial
 arithmetic, with custom types and ops (`lib/Dialect/Poly/`) — and the
 generated code grows from one base class to whole op definitions with
@@ -594,5 +567,5 @@ section 8 becomes essential there.
    already.)
 5. In `PassBase.td` (upstream LLVM), find the `Option` class and sketch —
    on paper only — what adding an `unroll-factor` option to
-   `AffineFullUnroll` would look like. Tutorial 5's dialect work will make
+   `AffineFullUnroll` would look like. Chapter 5's dialect work will make
    you write such things for real.
