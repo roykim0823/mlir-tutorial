@@ -19,6 +19,9 @@ in Chapter 5's `PolyOps.td` get explained.
 - How traits appear in generated C++, and where their `verify` hooks live.
 - That *missing* traits have visible consequences too (why CSE won't touch
   `poly.eval`).
+- How to audit the rest of the upstream pass list: most entries need
+  nothing from `poly`, one crashes the *tool* (a registration lesson),
+  and one waits for Chapter 7.
 
 **Prerequisites:** [Chapter 5](05-defining-a-new-dialect.md). Same build
 requirements as before (`tutorial-opt`, via the `$TUTORIAL_OPT` variable
@@ -79,7 +82,10 @@ Taking the three traits in turn:
 
 ### `Pure` — the workhorse
 
-`Pure` is actually a bundle of two independent promises:
+`Pure` is actually a bundle of two independent promises (both defined in
+upstream's
+[SideEffectInterfaces.td](https://github.com/llvm/llvm-project/blob/main/mlir/include/mlir/Interfaces/SideEffectInterfaces.td),
+the file to read for the full effect vocabulary):
 
 - **`NoMemoryEffect`** — executing this op neither reads nor writes any
   observable state. This is what lets CSE deduplicate it and dead-code
@@ -94,8 +100,11 @@ Taking the three traits in turn:
 The distinction is real and bites: this codebase's author first applied
 only
 `AlwaysSpeculatable` and was baffled that `--loop-invariant-code-motion`
-did nothing — reading the pass source revealed LICM requires *both*
-`isSpeculatable` *and* `isMemoryEffectFree`. Hoisting an op out of a loop
+did nothing — reading
+[the pass source](https://github.com/llvm/llvm-project/blob/main/mlir/lib/Transforms/Utils/LoopInvariantCodeMotionUtils.cpp)
+revealed LICM requires *both* `isSpeculatable` *and* `isMemoryEffectFree`
+(in today's source the gate is literally a call to a helper named
+`isPure`). Hoisting an op out of a loop
 moves it to different *and* possibly more/fewer executions; each half of
 `Pure` covers one of those hazards.
 
@@ -232,18 +241,95 @@ operands, traits or no traits.
 
 ### Control-flow sinking
 
-The dual of hoisting: [`tests/control_flow_sink.mlir`](../tests/control_flow_sink.mlir)
-builds two polynomials *before* a branch, but each is used in only one arm
-of an `scf.if`. Sinking moves each `poly.from_tensor` *into* the branch
-that uses it:
+The dual of hoisting. Where LICM rescues work from a region that runs
+*many* times,
+[control-flow sink](https://mlir.llvm.org/docs/Passes/#-control-flow-sink)
+pushes work into a region that may run *zero* times: an operation whose
+only uses sit inside one conditionally-executed region is moved into
+that region, so it executes only when its result is actually consumed.
+[`tests/control_flow_sink.mlir`](../tests/control_flow_sink.mlir) builds
+two polynomials *before* a branch, but each is used in only one arm of
+an `scf.if` (Chapter 1 §4's structured conditional):
+
+***tests/control_flow_sink.mlir***
+```mlir
+func.func @test_simple_sink(%arg0: i1) -> !poly.poly<10> {
+  %0 = arith.constant dense<[1, 2, 3]> : tensor<3xi32>
+  %p0 = poly.from_tensor %0 : tensor<3xi32> -> !poly.poly<10>
+  %1 = arith.constant dense<[9, 8, 16]> : tensor<3xi32>
+  %p1 = poly.from_tensor %1 : tensor<3xi32> -> !poly.poly<10>
+  %4 = scf.if %arg0 -> (!poly.poly<10>) {
+    %2 = poly.mul %p0, %p0 : !poly.poly<10>
+    scf.yield %2 : !poly.poly<10>
+  } else {
+    %3 = poly.mul %p1, %p1 : !poly.poly<10>
+    scf.yield %3 : !poly.poly<10>
+  }
+  return %4 : !poly.poly<10>
+}
+```
 
 ```bash
 $TUTORIAL_OPT -control-flow-sink tests/control_flow_sink.mlir
 ```
 
-so the untaken branch's polynomial is never materialized. Moving an op to
-*fewer* executions is speculation's mirror image — again licensed by
-`Pure`.
+```mlir
+func.func @test_simple_sink(%arg0: i1) -> !poly.poly<10> {
+  %0 = scf.if %arg0 -> (!poly.poly<10>) {
+    %cst = arith.constant dense<[1, 2, 3]> : tensor<3xi32>
+    %1 = poly.from_tensor %cst : tensor<3xi32> -> !poly.poly<10>
+    %2 = poly.mul %1, %1 : !poly.poly<10>
+    scf.yield %2 : !poly.poly<10>
+  } else {
+    %cst = arith.constant dense<[9, 8, 16]> : tensor<3xi32>
+    %1 = poly.from_tensor %cst : tensor<3xi32> -> !poly.poly<10>
+    %2 = poly.mul %1, %1 : !poly.poly<10>
+    scf.yield %2 : !poly.poly<10>
+  }
+  return %0 : !poly.poly<10>
+}
+```
+
+Comparing before and after:
+
+- **Nothing is left in front of the branch.** Each `poly.from_tensor`
+  moved into the arm that uses it, so whichever way `%arg0` goes at
+  runtime, the untaken arm's polynomial is never materialized — the
+  work runs "only if used" instead of "always".
+- **The `arith.constant`s went along for the ride.** Sinking chases
+  whole def chains: once a `from_tensor` sinks, its constant's only use
+  sits inside that arm as well, making the constant sinkable too. (It
+  qualifies for the same reason — `arith.constant` carries `Pure`
+  upstream.)
+- **The licensing trait is `Pure` again, seen from the other side.**
+  LICM moved an op to *more* executions — that's why it also demands
+  the speculatability half (§2's war story). Sinking moves an op to
+  *fewer*, and the half doing the work is `NoMemoryEffect`: skipping an
+  execution is only invisible when the op has no effects to skip. If
+  `poly.from_tensor` appended to a log file, sinking it would silence
+  the log every time the other arm ran.
+
+One thing sinking will *not* do is duplicate work. Rewrite the test so
+*both* arms use the same polynomial — `%p0` squared in one arm, added to
+itself in the other:
+
+```mlir
+%p0 = poly.from_tensor %0 : tensor<3xi32> -> !poly.poly<10>
+%4 = scf.if %arg0 -> (!poly.poly<10>) {
+  %2 = poly.mul %p0, %p0 : !poly.poly<10>
+  scf.yield %2 : !poly.poly<10>
+} else {
+  %3 = poly.add %p0, %p0 : !poly.poly<10>
+  scf.yield %3 : !poly.poly<10>
+}
+```
+
+and the pass leaves the IR exactly as it found it (verified). The pass
+only *moves* ops, never clones them, so an op can sink only when **all**
+of its uses land in a single region — `%p0`'s uses span both arms, so it
+stays where it is, traits or no traits. Same lesson as LICM declining to
+hoist the `poly.add`: traits grant *permission*; the pass's own
+profitability and correctness analysis still decides.
 
 Run all three as tests:
 
@@ -275,6 +361,72 @@ Both `poly.eval` ops survive `-cse` (verified). Nothing is wrong with
 that, so the conservative default rules. When your shiny new op
 mysteriously escapes optimization, the first place to look is its trait
 list.
+
+### The rest of the pass list
+
+The three demos weren't cherry-picked — they're what remains after
+reading the
+[general transformation passes list](https://mlir.llvm.org/docs/Passes/#general-transformation-passes)
+end to end and asking, for each entry, *what does this pass need from
+`poly`?* The others sort into three buckets, and the sorting itself is
+a skill worth having whenever you bring up a new dialect:
+
+- **Nothing — the pass works on structures `poly` doesn't have.**
+  [`-mem2reg`](https://mlir.llvm.org/docs/Passes/#-mem2reg) (promotes
+  memory slots into SSA values) and
+  [`-sroa`](https://mlir.llvm.org/docs/Passes/#-sroa) (scalar
+  replacement of aggregates) rewrite memory operations, and `poly`
+  programs contain none;
+  [`-remove-dead-values`](https://mlir.llvm.org/docs/Passes/#-remove-dead-values)
+  trims unused function arguments and results;
+  [`-symbol-dce`](https://mlir.llvm.org/docs/Passes/#-symbol-dce)
+  deletes private functions nobody references. Stack all four onto a
+  `poly` file and nothing changes (verified):
+
+  ```bash
+  $TUTORIAL_OPT -mem2reg -sroa -remove-dead-values -symbol-dce tests/cse.mlir
+  ```
+
+  They aren't *failing* on `poly` — they have nothing to do here, and
+  no trait would change that.
+
+- **Something from the *tool*, not the dialect.**
+  [`-inline`](https://mlir.llvm.org/docs/Passes/#-inline) also has
+  nothing `poly`-specific to do — it rearranges function calls, and
+  `poly` ops would just ride along — but try it and this repo's binary
+  *crashes*:
+
+  ```bash
+  $TUTORIAL_OPT -inline tests/cse.mlir
+  ```
+
+  ```
+  LLVM ERROR: checking for an interface (`mlir::DialectInlinerInterface`)
+  that was promised by dialect 'func' but never implemented. This is
+  generally an indication that the dialect extension implementing the
+  interface was never registered.
+  ```
+
+  Decode it with section 1's vocabulary: inlining is powered by an
+  *interface* — attached to a whole dialect rather than a single op —
+  that answers questions like "may this body be inlined into that call
+  site?". The `func` dialect *promises* that interface but ships the
+  implementation in a separate extension, which upstream `mlir-opt`
+  registers and `tutorial-opt` never does — the same file inlines fine
+  under stock `mlir-opt` (verified with a two-function example). A
+  useful failure to have met: "the pass doesn't work" sometimes means a
+  missing trait, and sometimes a missing *registration* — Chapter 5
+  §3's lesson resurfacing one level up.
+
+- **Folding — the next chapter's subject.**
+  [`-sccp`](https://mlir.llvm.org/docs/Passes/#-sccp) (sparse
+  conditional constant propagation) propagates *values*: to push
+  constants through `poly.mul` it must ask the op to compute its
+  result, and nothing taught so far provides that. The machinery is
+  called a *folder*, and it's Chapter 7. (If you can't wait: the repo's
+  ops already carry Chapter 7's folders, so
+  `$TUTORIAL_OPT -sccp tests/sccp.mlir` already rewrites the constant
+  `poly` arithmetic into `poly.constant`s today — verified.)
 
 ## 4. Under the hood
 
@@ -334,6 +486,21 @@ reordering; canonicalization uses it to move constants rightward — the
 fact `PowerOfTwoExpand` relied on in Chapter 3!), `Involution`
 (`f(f(x)) = x`, would auto-cancel a hypothetical double `poly.neg`), and
 `Idempotent` (`f(f(x)) = f(x)`).
+
+Skimming the list also turns up whole families for capabilities `poly`'s
+ops don't have — regions and symbols — though you have been *consuming*
+them since Chapter 1: `IsolatedFromAbove` (Chapter 3 §4's isolation
+contract, the reason `func.func` can anchor a parallel pass),
+`Terminator` plus `SingleBlock`/`SingleBlockImplicitTerminator` (the
+rules that every block ends in a `return`/`scf.yield`/`affine.yield` —
+and that a trivial terminator may be inserted for you), `AffineScope`
+(also on `func.func`: the boundary inside which `affine`'s
+symbol-and-dimension rules apply), `SymbolTable` (on `builtin.module`;
+what makes lookups of `@main`-style names work), and `Broadcastable`
+(mixed-shape arithmetic for ML-style tensor ops — `poly`'s containers,
+by contrast, must match exactly, as `SameOperandsAndResultType`
+insists). None of these belong on `poly.add`; recognizing their names in
+other dialects' tablegen is the point.
 
 ## Where to go next
 

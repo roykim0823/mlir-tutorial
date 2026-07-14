@@ -42,6 +42,28 @@ $TUTORIAL_OPT $SCRATCH/poly_square_eval.mlir --canonicalize
 mlir-tblgen --gen-dialect-decls -I "$LLVM_INCLUDE" \
   -I ../../lib/Dialect/Poly ../../lib/Dialect/Poly/PolyDialect.td
 
+{ step "4. The type: !poly.poly<10>"; } 2>/dev/null
+# The generated PolynomialType class from section 4 (short; shown in full).
+mlir-tblgen --gen-typedef-decls -I "$LLVM_INCLUDE" \
+  -I ../../lib/Dialect/Poly ../../lib/Dialect/Poly/PolyTypes.td
+
+{ step "5. The ops"; } 2>/dev/null
+# The generated op classes run long; count the lines, then pull out the
+# pieces section 5 points at: one generated class per def...
+mlir-tblgen --gen-op-decls -I "$LLVM_INCLUDE" \
+  -I ../../lib/Dialect/Poly ../../lib/Dialect/Poly/PolyOps.td | wc -l
+mlir-tblgen --gen-op-decls -I "$LLVM_INCLUDE" \
+  -I ../../lib/Dialect/Poly ../../lib/Dialect/Poly/PolyOps.td \
+  | grep -E '^class [A-Za-z]+Op;'
+# ...and ONE op's generated class in full: AddOp (~73 lines; SubOp and MulOp
+# differ only in name, so one suffices). Look for the accessors named by
+# `arguments`/`results` (getLhs/getRhs/getOutput) and the typed build(...)
+# overloads that rewriter.create<AddOp>(...) consumes. The adaptor classes
+# preceding it are elided.
+mlir-tblgen --gen-op-decls -I "$LLVM_INCLUDE" \
+  -I ../../lib/Dialect/Poly ../../lib/Dialect/Poly/PolyOps.td \
+  | sed -n '/^class AddOp :/,/^};/p'
+
 { step "7. Step: exercise the syntax"; } 2>/dev/null
 $TUTORIAL_OPT $TESTS/poly_syntax.mlir
 

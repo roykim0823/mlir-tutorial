@@ -43,12 +43,43 @@ types with defined semantics. Defining one means providing:
 4. eventually, the *behaviors* hanging off those ops (verification,
    folding, lowering) — that's Chapters 6–11.
 
-In MLIR's informal taxonomy of dialects — some model *computation*
-(`arith`, `math`), some *structure* (`func`, `scf`), some *hardware*
-(`llvm`, `spirv`) — `poly` is squarely a computation dialect: it exists so
-that a program can say "multiply these polynomials" without saying how,
-keeping the mathematical intent visible for optimization, exactly the
-trick Chapter 1 §1 promised.
+### A taxonomy of dialects: where `poly` sits
+
+There is a large surface area of design options when writing a dialect,
+and it helps to first see the landscape of dialects that already exist.
+Upstream MLIR ships [around fifty](https://mlir.llvm.org/docs/Dialects/),
+and downstream projects (TensorFlow, IREE, torch-mlir, onnx-mlir) define
+many more — a zoo, until you sort the dialects by the *role* each plays
+in a compilation pipeline. The EuroLLVM 2023 talk
+["MLIR Dialect Design and Composition for Front-End Compilers"](https://www.youtube.com/watch?v=hIt6J1_E21c)
+by Jeff Niu and Mehdi Amini does exactly that. The first two columns
+below reproduce the talk's slide (asterisks included; TFG, TFSavedModel,
+TFE, tf_type, and TFRT are TensorFlow-family dialects); the third column
+explains each role:
+
+| Category | Dialects | What the role means |
+|---|---|---|
+| Input | TFG, TFSavedModel, "Input" (iree), Torch, ONNX | Mirror an external system's format so its programs can *enter* MLIR: `torch` models PyTorch programs, `onnx` models ONNX graphs. The design brief is faithful import, not optimization. |
+| Hourglass | GPU, LLVM, SPIRV, arith | The pipeline's narrow waist: many higher-level dialects lower *into* them, and one set of lowerings continues *out* to many targets. Chapter 1 §1's chain (`math` → `scf`/`arith` → `cf` → `llvm`) showed the funnel — arithmetic from any source ends up as `arith` ops, and a single `arith`-to-`llvm` conversion serves everything above it. |
+| Optimizer | linalg, affine, mhlo, shape, flow (iree) | Representations chosen to make a class of transformations tractable: `affine` (Chapter 1 §1) restricts loops to affine forms precisely so polyhedral loop analysis applies; `linalg` and `shape` do the analogous thing for tensor programs. |
+| Computation | arith, tensor, vector, index | The ordinary number-crunching that the other roles arrange and shuttle around. |
+| Output | RISCV, TFRT, LLVM, SPIRV | Mirror an external *target* so programs can leave MLIR: the `llvm` dialect is a transliteration of LLVM IR that exists to be translated out (Chapter 11 does it); `spirv` likewise for SPIR-V binaries. |
+| Paradigm | scf, linalg, openmp, cf, affine, func, builtin, gpu | Encode a programming model — the *shape* of a program rather than its math: `func` (functions and calls), `scf`/`cf` (Chapter 1 §1's structured vs unstructured control flow), `openmp` (shared-memory parallelism), `gpu` (the kernel-launch model). |
+| Glue | builtin\*, TFE\*, tf_type, DLTI\* | Shared vocabulary and metadata that let the others compose: `builtin` is the types and attributes every dialect borrows (`i32`, `tensor<3xi32>`, `dense<...>`), and [`dlti`](https://mlir.llvm.org/docs/Dialects/DLTIDialect/) attaches data-layout and target information to modules. |
+| Meta | PDL, IRDL, Transform | IR *about* IR: [`pdl`](https://mlir.llvm.org/docs/Dialects/PDLOps/) represents rewrite patterns themselves as MLIR programs (Chapter 13's PDLL compiles to it), [`irdl`](https://mlir.llvm.org/docs/Dialects/IRDL/) defines dialects as IR — a runtime alternative to this chapter's tablegen — and [`transform`](https://mlir.llvm.org/docs/Dialects/Transform/) scripts entire transformation pipelines as IR. |
+
+Two reading notes. First, the categories overlap on purpose — they
+classify *roles*, not dialects, and a dialect earns every role it plays:
+`llvm` and `spirv` are hourglass *and* output, `arith` is hourglass
+*and* computation, `affine` and `linalg` are optimizer *and* paradigm.
+Second, the zoo moves fast — `mhlo` (XLA's HLO in MLIR form) has since
+been succeeded by StableHLO — but the roles are stable even as the
+names rotate.
+
+In this taxonomy `poly` is squarely a **computation** dialect: it exists
+so that a program can say "multiply these polynomials" without saying
+how, keeping the mathematical intent visible for optimization, exactly
+the trick Chapter 1 §1 promised.
 
 ### What `poly` represents, concretely
 
@@ -469,6 +500,72 @@ different backends. The CMake side
 ([`CMakeLists.txt`](../lib/Dialect/Poly/CMakeLists.txt)) uses
 `add_mlir_dialect(...)` which bundles these backend invocations into one
 call.
+
+### The whole picture
+
+That's a lot of files playing relay — sections 2–6 introduced each one
+where it mattered, but the dependency structure is easier to see drawn
+once. Read the chart top to bottom: each of the three tablegen files is
+the head of its own vertical track (definitions → generated `.inc` pair →
+hand-written wrapper header), and everything funnels into the single
+`PolyDialect.cpp`:
+
+```
+         ┌────────────── include ──────────────┐
+         │                                     ▼
+   PolyDialect.td  ──▶  PolyTypes.td  ──▶  PolyOps.td        .td layer (you write;
+         │                    │                 │             A ──▶ B: B includes A)
+         │ mlir-tblgen        │ mlir-tblgen     │ mlir-tblgen
+         │ -gen-dialect-      │ -gen-typedef-   │ -gen-op-
+         │   decls / -defs    │   decls / -defs │   decls / -defs
+         ▼                    ▼                 ▼
+   PolyDialect.h.inc    PolyTypes.h.inc    PolyOps.h.inc     generated
+   PolyDialect.cpp.inc  PolyTypes.cpp.inc  PolyOps.cpp.inc   (never edited)
+         │                    │                 │
+         │ #include           │ #include        │ #include
+         ▼                    ▼                 ▼
+   PolyDialect.h        PolyTypes.h        PolyOps.h         .h layer (you write;
+   (wraps h.inc)        (wraps h.inc)      (wraps h.inc;     each a thin wrapper
+         │                    │             also includes    around its h.inc)
+         │                    │             PolyDialect.h,
+         │                    │             PolyTypes.h)
+         │                    │                 │
+         └──────────┬─────────┴─────────────────┘
+                    │ #include — all three .h, plus all three .cpp.inc
+                    │ (PolyTypes/PolyOps .cpp.inc twice, gated: once for
+                    │  the class bodies, once as the list handed to
+                    │  addTypes<...> / addOperations<...>)
+                    ▼
+              PolyDialect.cpp — initialize() attaches types and ops
+                    │
+                    │ compiled into the dialect library
+                    │ (BUILD: one gentbl_cc_library per .td + cc_library)
+                    ▼
+              tools/tutorial-opt.cpp — registry.insert<PolyDialect>()
+```
+
+Things the chart makes visible:
+
+- **The top row's arrows are the `-I` flags.** `PolyTypes.td` includes
+  `PolyDialect.td` (its `TypeDef<Poly_Dialect, ...>` must name the
+  dialect record), and `PolyOps.td` includes both (its ops name
+  `Poly_Dialect` *and* the `Polynomial` constraint). That's why
+  section 2's manual `mlir-tblgen` runs needed `-I lib/Dialect/Poly` —
+  tablegen re-resolves the includes every time it processes a file, so
+  each generator invocation sees one merged record universe. (The `.td`
+  files also include upstream bases — `OpBase.td`, `AttrTypeBase.td` —
+  resolved by the other `-I` path.)
+- **The hand-written layer is thin on purpose.** All three `.h` files
+  are a few lines each; the substance lives in the generated `.inc`s.
+  The only hand-written file with real content is `PolyDialect.cpp` —
+  and section 6 already noted the mild ugliness of how much must funnel
+  into it. (`PolyOps.h` also pulls in `PolyTraits.h` — Chapter 6's
+  subject, ignore it today.)
+- **Registration is a two-step chain.** `initialize()` attaches types
+  and ops to the *dialect* (bottom of the funnel), and section 3's
+  `registry.insert<PolyDialect>()` attaches the dialect to the *tool* —
+  break either link and `tutorial-opt` is back to section 3's
+  "unregistered dialect" error.
 
 ## 7. Step: exercise the syntax
 

@@ -27,7 +27,8 @@ $TUTORIAL_OPT --canonicalize $TESTS/sccp.mlir
 # same sccp command, now looking at the second function @test_poly_sccp
 $TUTORIAL_OPT -pass-pipeline="builtin.module(func.func(sccp))" $TESTS/sccp.mlir
 
-# "You can check the fold in isolation" — square.mlir scratch file from section 5
+{ step "5. Where does [1, 4, 10, 12, 9] come from?"; } 2>/dev/null
+# "You can check the fold in isolation" — square.mlir scratch file
 cat > $SCRATCH/square.mlir <<'EOF'
 func.func @square() -> !poly.poly<10> {
   %coeffs = arith.constant dense<[1, 2, 3]> : tensor<3xi32>
@@ -39,7 +40,7 @@ EOF
 
 $TUTORIAL_OPT --canonicalize $SCRATCH/square.mlir
 
-# "The wraparound, verified." — wraparound.mlir scratch file from section 5
+# "The wraparound, verified." — wraparound.mlir scratch file
 cat > $SCRATCH/wraparound.mlir <<'EOF'
 func.func @wraparound() -> !poly.poly<10> {
   %c = arith.constant dense<[0, 0, 0, 0, 0, 0, 1]> : tensor<7xi32>

@@ -4,9 +4,21 @@
 wants to replace `poly.mul` of *known* polynomials with the precomputed
 product, and traits alone can't do that — someone has to teach MLIR to
 actually *multiply polynomials at compile time*. That someone is the
-**folder**, the `fold` method behind `let hasFolder = 1`. This chapter
-also pays off the last two IOUs from Chapter 5: the `poly.constant` op
-and the dialect's `hasConstantMaterializer`.
+**folder**, the `fold` method behind Chapter 5's `let hasFolder = 1`.
+
+One thing to get straight up front, because the names blur together:
+folding is **not a pass**, and it doesn't compete with `--canonicalize`
+or `--sccp` — it's the op-level mechanism *underneath* both. You write
+one `fold` method per op, saying what that op evaluates to when its
+inputs are known; upstream passes then *drive* your folders with
+different strategies — `--canonicalize` greedily, for local cleanup;
+`--sccp` from a global dataflow analysis that pushes known constants
+through branches and loops. The passes supply the strategy, the folder
+supplies the arithmetic; section 1 makes that division precise.
+Completing the machinery are the last two IOUs from Chapter 5: the
+`poly.constant` op (a computed constant has to live *somewhere* in the
+IR) and the dialect's `hasConstantMaterializer` (what lets a pass create
+that op on your behalf).
 
 **What you will learn:**
 
@@ -49,7 +61,9 @@ ran), and inside dedicated passes:
 - **`--canonicalize`** runs folds (plus canonicalization patterns,
   Chapter 9's subject) greedily and deletes dead code. It is *local*: it
   cannot reason across control-flow boundaries.
-- **`--sccp`** — *sparse conditional constant propagation* — is the global
+- [**`--sccp`**](https://mlir.llvm.org/docs/Passes/#-sccp) —
+  [*sparse conditional constant propagation*](https://en.wikipedia.org/wiki/Sparse_conditional_constant_propagation),
+  a classic SSA-based optimization long predating MLIR — is the global
   consumer: it runs a dataflow analysis that tracks "is this value known
   to be a constant?" through branches and loops (it can even conclude that
   a branch is never taken and propagate through the surviving side), and
