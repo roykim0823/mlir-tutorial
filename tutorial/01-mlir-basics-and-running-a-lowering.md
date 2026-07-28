@@ -28,7 +28,7 @@ representation (IR): the input language is translated into LLVM IR, all
 optimizations happen there, and then machine code is emitted.
 
 MLIR ("Multi-Level IR") instead splits compilation into many smaller steps
-between many small IRs. Its two central concepts:
+between many small IRs. Its two central concepts: **Dialects** and **Lowering**
 
 - A **dialect** is a self-contained set of operations (and possibly types)
   with defined semantics. Dialects can sit at very different levels of

@@ -10,8 +10,8 @@ MLIR project uses.
 
 - How LLVM-style end-to-end testing with `lit` and `FileCheck` works.
 - The FileCheck directive family — what `CHECK:` really matches, and how
-  `CHECK-LABEL`, `CHECK-SAME`, and capture variables differ from it — each
-  demonstrated with a passing and a failing run.
+  `CHECK-NOT`, `CHECK-LABEL`, `CHECK-SAME`, and capture variables differ
+  from it.
 - How to run a test's underlying commands by hand, without lit or Bazel.
 - How FileCheck (the test-time verifier) and `generate-test-checks.py`
   (the authoring-time draft generator) divide the work of exhaustive tests.
@@ -45,7 +45,7 @@ FileCheck what the output of those commands must (and must not) contain.
 The test *is* the input program, annotated.
 
 The plan for this chapter: get the tools (section 2), learn FileCheck's
-directive language on a small self-contained example (section 3), then read
+directive language (section 3), then read
 and run this repo's real ctlz tests (sections 4–5), see how Bazel and CMake
 automate the whole thing (sections 6–7), and finish by testing *behavior*
 instead of syntax with `mlir-runner` (section 8).
@@ -89,233 +89,74 @@ MLIR_RUNNER=$(bazel cquery --output=files @llvm-project//mlir:mlir-runner)
 Run every command in this chapter from the repo root (the Bazel variables
 above may hold repo-relative paths).
 
-## 3. A FileCheck primer, one directive at a time
+## 3. A FileCheck primer
 
 FileCheck's job is simple to state: it reads a program's output on
 **stdin**, reads *check directives* from a file you name, and exits 0 if
-every directive is satisfied, 1 otherwise. All the subtlety is in the
-directives. Every directive is a prefix plus an optional suffix —
-`CHECK:`, `CHECK-LABEL:`, `CHECK-SAME:`, `CHECK-NOT:` — and the suffix
-changes **where the pattern is allowed to match**.
+every directive is satisfied, 1 otherwise. It is **silent on success** —
+the exit code is the entire interface, which is what makes it composable
+into test harnesses. All the subtlety is in the directives. Every
+directive is a prefix plus an optional suffix — `CHECK:`, `CHECK-NOT:`,
+`CHECK-LABEL:`, `CHECK-SAME:` — and the suffix changes **where the
+pattern is allowed to match**.
 
-This repo carries a small demo file for exactly this section,
-[`tests/filecheck_directives.mlir`](../tests/filecheck_directives.mlir).
-Its input program is two functions, where only the **second** one contains
-an `arith.addi`:
-
-***tests/filecheck_directives.mlir*** (excerpt)
-```mlir
-func.func @square(%arg0: i32) -> i32 {
-  %0 = arith.muli %arg0, %arg0 : i32
-  func.return %0 : i32
-}
-
-func.func @double(%arg0: i32) -> i32 {
-  %0 = arith.addi %arg0, %arg0 : i32
-  func.return %0 : i32
-}
-```
-
-The file contains five independent *groups* of check directives, each
-demonstrating one lesson. To keep the groups apart it uses FileCheck's
-`--check-prefix=NAME` flag: with it, FileCheck ignores `CHECK` and instead
-looks for directives spelled `NAME:`, `NAME-LABEL:`, `NAME-SAME:`, and so
-on. (Ignore the `RUN:` lines at the top of the file for now — section 4
-explains them, and section 6 explains the `not` in two of them. We will run
-everything by hand.)
-
-One more rule before we start: *where* directives physically sit in a file
-is irrelevant to FileCheck — it just collects them into an ordered list.
-The demo file groups them at the bottom; the repo's real tests put them
-next to the code they describe.
-
-### What `CHECK:` matches — and the `LOOSE` group
-
-The precise rules for a plain check directive:
+The precise rules for a plain `CHECK:`:
 
 - The pattern only needs to match a **substring of one line, anywhere on
-  the line** — `LOOSE: arith.addi` matches the line
+  the line** — `CHECK: arith.addi` matches the line
   `%0 = arith.addi %arg0, %arg0 : i32`.
 - The pattern is (mostly) **literal text**, not a regex — but runs of
   whitespace match any whitespace, and you can embed a real regex between
-  `{{` and `}}` (e.g. `{{[0-9]+}}`), or a *capture* between `[[` and `]]`
-  (the `CAP` group, below).
-- Directives must match **in order**: each one starts scanning **where the
-  previous match ended** — but it may **skip any number of lines** on its
-  way to a match.
+  `{{` and `}}` (e.g. `{{[0-9]+}}`) or a *capture* between `[[` and `]]`
+  (explained below).
+- Directives must match **in order**: each one starts scanning **where
+  the previous match ended** — but it may **skip any number of lines** on
+  its way to a match.
 
 That last rule is a loophole: a check will happily skip past the *end of
 the thing you meant to test* and find its match somewhere else entirely.
-The `LOOSE` group constructs that failure — suppose we (wrongly) believe
-`@square` computes `2*x`:
+`CHECK: func.func @square` followed by `CHECK: arith.addi` passes even
+when `@square` contains no `arith.addi` — FileCheck just skips ahead
+until some *later* function provides one, and a regression in `@square`
+goes unnoticed. The suffixed directives exist to pin matches down:
 
-***tests/filecheck_directives.mlir*** (excerpt)
-```mlir
-// LOOSE: func.func @square
-// LOOSE: arith.addi
-```
+- **`CHECK-LABEL:`** closes exactly that loophole. FileCheck first finds
+  the line matching each label, uses those lines to **split the input
+  into blocks**, and then processes every other directive **only within
+  its own block** — a check between two labels can never match text
+  beyond the next label. Labels also localize failures: without them, one
+  bad check throws all the *following* checks out of alignment, and the
+  error lands far from the real problem. Two rules when choosing a label:
+  it should match **exactly one line** of the output — function
+  signatures are the classic choice — and a label pattern **may not
+  define or use capture variables** (a rule that shapes how real tests
+  check signatures, as the next directive shows).
+- **`CHECK-SAME:`** requires its pattern to match **on the same line as
+  the previous match**, picking up where that match ended; if FileCheck
+  would have to cross a newline, the check fails. Its two practical jobs:
+  splitting one long assertion into readable pieces (a signature check
+  becomes a label plus several `-SAME` lines), and attaching captures to
+  a label (the label can't hold them; the `-SAME` directly under it can).
+- **`CHECK-NOT:`** inverts the assertion: its pattern must appear
+  **nowhere** between the previous match and the next positive match —
+  the directive for "the lowered op is *gone*".
+- **Capture variables:** `[[V:regex]]` **captures** whatever the regex
+  matched into a variable named `V`, and a later `[[V]]` (no colon)
+  asserts that the *same* text appears again. This is essential for SSA
+  values: you can't hard-code `%0` or `%arg0` in a test, because the
+  printer is free to rename values — what matters is that the value
+  *defined here* is the one *used there*.
 
-Run it (`$MLIR_OPT` with no pass just parses and re-prints the input):
+Two more mechanics before we read a real test. First, *where* directives
+physically sit in the check file is irrelevant to FileCheck — it just
+collects them into an ordered list, so a test can interleave its checks
+with the code they describe (the repo's tests do). Second, the
+`--check-prefix=NAME` flag makes FileCheck ignore `CHECK` and instead
+look for directives spelled `NAME:`, `NAME-LABEL:`, `NAME-SAME:`, and so
+on — that is how one file bundles several independent groups of checks
+(section 8 uses it).
 
-```bash
-$MLIR_OPT tests/filecheck_directives.mlir \
-  | $FILECHECK tests/filecheck_directives.mlir --check-prefix=LOOSE
-echo $?   # prints 0 — the checks PASS
-```
-
-Note that FileCheck is **silent on success** — the exit code is the entire
-interface, which is what makes it composable into test harnesses.
-
-And that's the problem: the checks pass even though `@square` contains no
-`arith.addi`. After matching the `@square` line, FileCheck skipped over the
-rest of `@square`, past the function boundary, and found `arith.addi`
-inside `@double`. A regression in `@square` would go completely unnoticed.
-
-### `CHECK-LABEL:` — partition the output into blocks
-
-The `-LABEL` suffix exists to close exactly that loophole. It looks like a
-normal check, but changes how the *whole file* is processed: FileCheck
-first finds the line matching each label, uses those lines to **split the
-input into blocks**, and then processes every other directive **only within
-its own block**. A check between two labels can never match text beyond the
-next label.
-
-The `STRICT` group makes the same bogus assertion as `LOOSE`, wrapped in
-labels:
-
-***tests/filecheck_directives.mlir*** (excerpt)
-```mlir
-// STRICT-LABEL: func.func @square
-// STRICT: arith.addi
-// STRICT-LABEL: func.func @double
-```
-
-```bash
-$MLIR_OPT tests/filecheck_directives.mlir \
-  | $FILECHECK tests/filecheck_directives.mlir --check-prefix=STRICT
-```
-
-Now the bug is caught, and we meet our first FileCheck error report:
-
-```
-tests/filecheck_directives.mlir:35:12: error: STRICT: expected string not found in input
-// STRICT: arith.addi
-           ^
-<stdin>:2:19: note: scanning from here
- func.func @square(%arg0: i32) -> i32 {
-                  ^
-<stdin>:3:7: note: possible intended match here
- %0 = arith.muli %arg0, %arg0 : i32
-      ^
-```
-
-Its anatomy: the `error:` names the directive that could not be satisfied
-(file and line in the *check* file); `scanning from here` points into the
-*input* at where the search began; `possible intended match here` is
-FileCheck's guess at what you meant. Below that (abbreviated away here) it
-prints the whole input, annotated — and in that dump you can see the search
-region stop at the `func.func @double` line: the block boundary. Two side
-benefits of labels follow from this design:
-
-- **Better error messages.** Without labels, one bad check can throw all
-  the *following* checks out of alignment, and FileCheck ends up reporting
-  a confusing failure far from the real problem. With labels, a failure is
-  localized to one block, and the `possible intended match` hint usually
-  points at the culprit (here: it's `muli`, not `addi`).
-- **Blocks can't contaminate each other.** Labels themselves must still
-  appear in order, but each block's checks restart cleanly at its label.
-
-Two rules to remember when choosing a label: it should match **exactly one
-line** of the output — function signatures are the classic choice — and a
-label pattern **may not define or use capture variables**. (That second
-rule shapes how real tests check signatures, as the next two groups show.)
-
-### `CHECK-SAME:` — continue on the same line
-
-The `-SAME` suffix requires its pattern to match **on the same line as the
-previous match**, picking up where that match ended. If FileCheck would
-have to cross a newline to satisfy it, the check fails. (For the same
-reason, it cannot be the first directive in a file — there is no previous
-match to share a line with.) It has two practical jobs:
-
-1. **Splitting one long assertion into readable pieces.** A signature
-   check like "name, then argument, then return type" can be a label plus
-   several `-SAME` lines instead of one enormous line.
-2. **Attaching captures to a label.** A label can't contain captures; the
-   `-SAME` directly under it can.
-
-The `SIG` group matches three pieces of `@square`'s signature, all on one
-output line:
-
-***tests/filecheck_directives.mlir*** (excerpt)
-```mlir
-// SIG-LABEL: func.func @square(
-// SIG-SAME: %arg0: i32
-// SIG-SAME: -> i32
-```
-
-```bash
-$MLIR_OPT tests/filecheck_directives.mlir \
-  | $FILECHECK tests/filecheck_directives.mlir --check-prefix=SIG
-echo $?   # prints 0
-```
-
-The `SIGBAD` group demands something that is on the *next* line:
-
-***tests/filecheck_directives.mlir*** (excerpt)
-```mlir
-// SIGBAD-LABEL: func.func @square(
-// SIGBAD-SAME: arith.muli
-```
-
-```bash
-$MLIR_OPT tests/filecheck_directives.mlir \
-  | $FILECHECK tests/filecheck_directives.mlir --check-prefix=SIGBAD
-```
-
-```
-tests/filecheck_directives.mlir:47:17: error: SIGBAD-SAME: is not on the same line as the previous match
-// SIGBAD-SAME: arith.muli
-                ^
-<stdin>:3:7: note: 'next' match was here
- %0 = arith.muli %arg0, %arg0 : i32
-      ^
-<stdin>:2:20: note: previous match ended here
- func.func @square(%arg0: i32) -> i32 {
-                   ^
-```
-
-FileCheck found the text — just not where `-SAME` demands it.
-
-### Capture variables — the `CAP` group
-
-The double-bracket blocks: `[[V:regex]]` **captures** whatever the regex
-matched into a variable named `V`, and a later `[[V]]` (no colon) asserts
-that the *same* text appears again. This is essential for SSA values: you
-can't hard-code `%0` or `%arg0` in a test, because the printer is free to
-rename values — what matters is that the value *defined here* is the one
-*used there*. The `CAP` group asserts exactly that structure about
-`@square`: both operands of the multiply are the same value, and the value
-returned is the multiply's result —
-
-***tests/filecheck_directives.mlir*** (excerpt)
-```mlir
-// CAP-LABEL: func.func @square(
-// CAP: %[[V:.*]] = arith.muli %[[A:.*]], %[[A]] : i32
-// CAP: return %[[V]] : i32
-```
-
-```bash
-$MLIR_OPT tests/filecheck_directives.mlir \
-  | $FILECHECK tests/filecheck_directives.mlir --check-prefix=CAP
-echo $?   # prints 0
-```
-
-Whatever the printer decides to call these values, `@square` must multiply
-*something by itself* and return *that product* — which is precisely the
-meaning of "squaring", captured without naming a single SSA value.
-
-### The family at a glance
+The family at a glance:
 
 | Directive | The pattern must match... | Typical use |
 |---|---|---|
@@ -325,10 +166,9 @@ meaning of "squaring", captured without naming a single SSA value.
 | `CHECK-LABEL:` | exactly one line; splits input into independent blocks; no captures | function boundaries |
 | `CHECK-NEXT:` | on the line **immediately after** the previous match | airtight sequences (not used in this repo's tests) |
 
-(`CHECK-NOT` is the one member of this table we haven't run yet — it shows
-up in the real test in the next section. There are more —
-`CHECK-DAG`, `CHECK-COUNT-<n>`, ... — see the
-[FileCheck documentation](https://llvm.org/docs/CommandGuide/FileCheck.html).)
+(There are more — `CHECK-DAG`, `CHECK-COUNT-<n>`, ... — see the
+[FileCheck documentation](https://llvm.org/docs/CommandGuide/FileCheck.html).
+The next two sections put the table to work on this repo's real tests.)
 
 ## 4. Step: read a real test, and run it by hand
 
@@ -354,9 +194,10 @@ The `CHECK` lines you can already read: some output line must contain
 `call`, and `math.ctlz` must not appear before it — `CHECK-NOT` is the
 absence directive from the table, evaluated over the window that ends at
 the next positive match. Together: "after running the lowering, the ctlz
-op is gone and a function call appeared." (Note this is the loose style
-from the primer's `LOOSE` group — deliberately so; how tight to make a
-test is a judgment call we return to in section 5.)
+op is gone and a function call appeared." (Note this is the loose style —
+plain `CHECK`s that may skip lines, nothing pinned down by labels —
+deliberately so; how tight to make a test is a judgment call we return to
+in section 5.)
 
 The genuinely new line is the first one:
 
@@ -396,7 +237,7 @@ FileCheck reports the first assertion it cannot satisfy — and, perhaps
 surprisingly, that is `CHECK: call`, not the `CHECK-NOT`. A `CHECK-NOT` is
 only evaluated over the window ending at the next positive match; since
 `call` never matches, that window never closes, and FileCheck gives up on
-`call` first (error anatomy as in section 3):
+`call` first:
 
 ```
 tests/ctlz_simple.mlir:5:12: error: CHECK: expected string not found in input
@@ -409,6 +250,14 @@ module {
  %0 = math.ctlz %arg0 : i32
            ^
 ```
+
+This is FileCheck's standard error report; its anatomy is worth learning
+once. The `error:` names the directive that could not be satisfied (file
+and line in the *check* file); `scanning from here` points into the
+*input* at where the search began; `possible intended match here` is
+FileCheck's guess at what you meant — here it correctly fingers the
+un-lowered `math.ctlz`. Below that (abbreviated away here) it prints the
+whole input, annotated with where each directive matched or gave up.
 
 That's the entire mechanism. Everything Bazel and lit add on top —
 discovering test files, setting `$PATH`, substituting `%s` and `%t`,
@@ -591,16 +440,11 @@ Entry by entry:
   and `clang` (the path to a native executable, Chapter 11).
 - **The two oddballs, `not` and `count`, are tiny LLVM test helpers:**
   `not` inverts a command's exit code, so a `RUN` line can assert that a
-  command *fails* — that is how section 3's demo file checks in its two
-  deliberately-failing groups, e.g.
-
-```
-// RUN: mlir-opt %s | not FileCheck %s --check-prefix=STRICT
-```
-
-(`count` checks the number of lines of output; nothing here uses it, but it
-costs nothing to bundle.) The last entry, `@mlir_tutorial_pip_deps//lit`,
-is the `lit` Python package itself, pinned via pip (more on that below).
+  command *fails* (`RUN: mlir-opt %s ... | not FileCheck %s` — "these
+  checks must NOT match"); `count` checks the number of lines of output.
+  Nothing in `tests/` currently uses either, but they cost nothing to
+  bundle. The last entry, `@mlir_tutorial_pip_deps//lit`, is the `lit`
+  Python package itself, pinned via pip (more on that below).
 
 **(b) [`bazel/lit.bzl`](../bazel/lit.bzl)** defines that macro. For each
 `.mlir` file it emits a `py_test` target that invokes `lit` on the file, with
@@ -774,7 +618,7 @@ Total Discovered Tests: 19
 (`-s` keeps the output terse, `-v` prints the failing RUN commands and
 FileCheck errors when something breaks. If you haven't built `tutorial-opt`
 yet, lit prints a `Did not find tutorial-opt` note — harmless for the ctlz
-tests and the section-3 demo, which only need the upstream tools.)
+tests, which only need the upstream tools.)
 
 ## 8. Bonus step: testing behavior, not syntax, with `mlir-runner`
 
@@ -925,7 +769,7 @@ against.
   stdout is saved there and then fed to FileCheck. (You could pipe directly,
   but a temp file makes debugging failures easier.)
 - `--check-prefix=CHECK_TEST_7i32_TO_29` — the prefix mechanism from
-  section 3's demo file, used here to bundle several independent RUN+CHECK
+  section 3, used here to bundle several independent RUN+CHECK
   groups into one file: the actual file has a second test,
   `test_7i64_to_61`, verifying the 64-bit variant with its own prefix.
 - Multiple `RUN:` lines in one file are all executed; a trailing `\` splits
@@ -964,11 +808,7 @@ custom passes.
 3. Break `tests/ctlz.mlir` deliberately (change a captured variable like
    `%[[VAL_0]]` to `%[[VAL_1]]` somewhere) and read the FileCheck error to
    get comfortable with its failure output.
-4. Add a sixth group to `tests/filecheck_directives.mlir` that asserts, with
-   captures, that `@double` returns the sum of its argument with itself —
-   and a matching `RUN` line. Then make it fail once on purpose (assert
-   `arith.muli` instead) to check that your `RUN` line really runs.
-5. The last line of `tests/ctlz.mlir` is
+4. The last line of `tests/ctlz.mlir` is
    `// NOCVT-NOT: __mlir_math_ctlz_i32` — and no `RUN` line in the file
    ever passes `--check-prefix=NOCVT`. FileCheck only looks for the
    prefixes it is told about, so this assertion has *never been checked*

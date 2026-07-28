@@ -37,12 +37,18 @@ follow them for any edit, enhancement, or new chapter in this repo.
   material in chapter 13 §4 (external-constraint names don't travel).
   `tests/ctlz.mlir`'s last line (`// NOCVT-NOT: ...`) is dead — no RUN
   line uses that prefix, never has — deliberately left, used as
-  chapter 02 exercise 5 (verified: passes with `--convert-math-to-funcs`
+  chapter 02 exercise 4 (verified: passes with `--convert-math-to-funcs`
   alone, fails against converted output). `tests/filecheck_directives.mlir`
-  is an addition of this fork (not upstream): the demo file for chapter
-  02 §3's FileCheck primer, five `--check-prefix` groups, the two
-  deliberately-failing ones inverted with `not` in their RUN lines; it
-  passes under lit with upstream tools only.
+  (a fork-added demo file, five `--check-prefix` groups, two of them
+  deliberately failing behind `not`) was **removed 2026-07-28** along with
+  the directive-by-directive walkthrough it powered: the user judged the
+  deep primer too much for this book and moved both (expanded) to a
+  separate repo, `~/study/mlir-tooling-playground/lit-and-filecheck/`.
+  Chapter 02 §3 is now a compact prose primer (no demo file, no runnable
+  commands — 02.sh marks §3 with a plain comment), the §4 failure demo
+  carries the error-anatomy explanation, and the old exercise 4 left with
+  the file (exercise 5 → 4). With 19 `tests/*.mlir` files again, §7's
+  `Total Discovered Tests: 19` lit output is correct as shown.
 
 - **Companion code `tutorial/code/NN/`** holds buildable, runnable copies
   of chapter listings that exist nowhere in the main tree (user request,

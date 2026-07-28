@@ -11,25 +11,7 @@ step() { { set +x; } 2>/dev/null; echo; echo "### $* ###"; set -x; }
 set -x  # turn on command echoing
 TESTS="../../tests"
 
-{ step "3. A FileCheck primer, one directive at a time (02-testing-a-lowering.md)"; } 2>/dev/null
-cat $TESTS/filecheck_directives.mlir
-
-mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=LOOSE
-echo $?
-
-mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=STRICT
-echo $?
-
-mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=SIG
-echo $?
-
-mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=SIGBAD
-echo $?
-
-mlir-opt $TESTS/filecheck_directives.mlir | FileCheck $TESTS/filecheck_directives.mlir --check-prefix=CAP
-echo $?
-
-mlir-opt $TESTS/ctlz_simple.mlir | FileCheck $TESTS/ctlz_simple.mlir 
+# Section 3 (A FileCheck primer) is prose-only — no runnable commands.
 
 { step "4. Step: read a real test, and run it by hand"; } 2>/dev/null
 cat $TESTS/ctlz_simple.mlir

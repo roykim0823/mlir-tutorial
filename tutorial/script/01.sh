@@ -22,6 +22,9 @@ mlir-opt -- $TESTS/ctlz_simple.mlir
 # expected to FAIL: the verifier demo (i32 * i64 mismatch)
 mlir-opt -- $TESTS/wrong_type.mlir
 
+{ step "3. Step: run mlir-opt with --mlir-print-op-generic"; } 2>/dev/null
+mlir-opt --mlir-print-op-generic $TESTS/ctlz_simple.mlir
+
 { step "4. Step: apply the lowering"; } 2>/dev/null
 mlir-opt --convert-math-to-funcs=convert-ctlz $TESTS/ctlz_simple.mlir
 
